@@ -577,6 +577,134 @@ func TestCodexProvider_ChatRoundTrip_ModelFallbackFromUnsupported(t *testing.T) 
 	}
 }
 
+func TestCodexProvider_ChatRoundTrip_UsesStreamingTextWhenCompletedOutputEmpty(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			http.Error(w, "not found: "+r.URL.Path, http.StatusNotFound)
+			return
+		}
+
+		resp := map[string]any{
+			"id":     "resp_test",
+			"object": "response",
+			"status": "completed",
+			"output": []map[string]any{},
+			"usage": map[string]any{
+				"input_tokens":          4,
+				"output_tokens":         3,
+				"total_tokens":          7,
+				"input_tokens_details":  map[string]any{"cached_tokens": 0},
+				"output_tokens_details": map[string]any{"reasoning_tokens": 0},
+			},
+		}
+		writeSSEEvent(t, w, "response.output_item.added", map[string]any{
+			"type":            "response.output_item.added",
+			"sequence_number": 1,
+			"output_index":    0,
+			"item": map[string]any{
+				"id":      "msg_1",
+				"type":    "message",
+				"role":    "assistant",
+				"status":  "in_progress",
+				"content": []map[string]any{},
+			},
+		})
+		writeSSEEvent(t, w, "response.output_text.delta", map[string]any{
+			"type":            "response.output_text.delta",
+			"sequence_number": 2,
+			"output_index":    0,
+			"content_index":   0,
+			"item_id":         "msg_1",
+			"delta":           "OK",
+			"logprobs":        []any{},
+		})
+		writeSSEEvent(t, w, "response.completed", map[string]any{
+			"type":            "response.completed",
+			"sequence_number": 3,
+			"response":        resp,
+		})
+		fmt.Fprintf(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	provider := NewCodexProvider("test-token", "acc-123")
+	provider.client = createOpenAITestClient(server.URL, "test-token", "acc-123")
+
+	resp, err := provider.Chat(t.Context(), []Message{{Role: "user", Content: "Hello"}}, nil, "gpt-4o", map[string]any{})
+	if err != nil {
+		t.Fatalf("Chat() error: %v", err)
+	}
+	if resp.Content != "OK" {
+		t.Fatalf("Content = %q, want %q", resp.Content, "OK")
+	}
+	if resp.Usage.TotalTokens != 7 {
+		t.Errorf("TotalTokens = %d, want 7", resp.Usage.TotalTokens)
+	}
+}
+
+func TestCodexProvider_ChatRoundTrip_UsesStreamingFunctionCallWhenCompletedOutputEmpty(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			http.Error(w, "not found: "+r.URL.Path, http.StatusNotFound)
+			return
+		}
+
+		resp := map[string]any{
+			"id":     "resp_test",
+			"object": "response",
+			"status": "completed",
+			"output": []map[string]any{},
+			"usage": map[string]any{
+				"input_tokens":          4,
+				"output_tokens":         3,
+				"total_tokens":          7,
+				"input_tokens_details":  map[string]any{"cached_tokens": 0},
+				"output_tokens_details": map[string]any{"reasoning_tokens": 0},
+			},
+		}
+		writeSSEEvent(t, w, "response.output_item.done", map[string]any{
+			"type":            "response.output_item.done",
+			"sequence_number": 1,
+			"output_index":    0,
+			"item": map[string]any{
+				"id":        "fc_1",
+				"type":      "function_call",
+				"call_id":   "call_1",
+				"name":      "get_pnl_summary",
+				"arguments": `{"provider":"bitkub"}`,
+				"status":    "completed",
+			},
+		})
+		writeSSEEvent(t, w, "response.completed", map[string]any{
+			"type":            "response.completed",
+			"sequence_number": 2,
+			"response":        resp,
+		})
+		fmt.Fprintf(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	provider := NewCodexProvider("test-token", "acc-123")
+	provider.client = createOpenAITestClient(server.URL, "test-token", "acc-123")
+
+	resp, err := provider.Chat(t.Context(), []Message{{Role: "user", Content: "portfolio?"}}, nil, "gpt-4o", map[string]any{})
+	if err != nil {
+		t.Fatalf("Chat() error: %v", err)
+	}
+	if resp.FinishReason != "tool_calls" {
+		t.Fatalf("FinishReason = %q, want tool_calls", resp.FinishReason)
+	}
+	if len(resp.ToolCalls) != 1 {
+		t.Fatalf("len(ToolCalls) = %d, want 1", len(resp.ToolCalls))
+	}
+	if resp.ToolCalls[0].ID != "call_1" || resp.ToolCalls[0].Name != "get_pnl_summary" {
+		t.Fatalf("ToolCall = %+v, want call_1/get_pnl_summary", resp.ToolCalls[0])
+	}
+	if got := resp.ToolCalls[0].Arguments["provider"]; got != "bitkub" {
+		t.Fatalf("provider arg = %v, want bitkub", got)
+	}
+}
+
 func TestCodexProvider_GetDefaultModel(t *testing.T) {
 	p := NewCodexProvider("test-token", "")
 	if got := p.GetDefaultModel(); got != codexDefaultModel {
@@ -642,4 +770,15 @@ func writeCompletedSSE(w http.ResponseWriter, response map[string]any) {
 	fmt.Fprintf(w, "event: response.completed\n")
 	fmt.Fprintf(w, "data: %s\n\n", string(b))
 	fmt.Fprintf(w, "data: [DONE]\n\n")
+}
+
+func writeSSEEvent(t *testing.T, w http.ResponseWriter, event string, payload map[string]any) {
+	t.Helper()
+	b, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("Marshal event: %v", err)
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	fmt.Fprintf(w, "event: %s\n", event)
+	fmt.Fprintf(w, "data: %s\n\n", string(b))
 }

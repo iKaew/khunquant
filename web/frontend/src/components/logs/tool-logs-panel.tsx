@@ -69,7 +69,8 @@ function ToolLogCard({ entry }: { entry: ToolLogEntry }) {
   // result entry
   const Icon = entry.hasError ? IconAlertTriangle : IconCheck
   const iconColor = entry.hasError ? "text-red-400" : "text-green-400"
-  const preview = entry.resultPreview + (entry.resultPreview.endsWith("...") ? " (truncated)" : "")
+  const content = entry.resultFull || entry.resultPreview
+  const isTruncated = content.endsWith("...") || (!entry.resultFull && entry.resultPreview.endsWith("..."))
 
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
@@ -78,15 +79,18 @@ function ToolLogCard({ entry }: { entry: ToolLogEntry }) {
           <Icon className={`size-4 shrink-0 ${iconColor}`} />
           <span className="font-mono text-sm font-medium text-zinc-100">{entry.tool}</span>
           <span className="text-xs text-zinc-500">result</span>
+          {isTruncated && (
+            <span className="text-xs text-amber-500/70">truncated</span>
+          )}
           {entry.time && (
             <span className="ml-auto text-xs text-zinc-500">{entry.time}</span>
           )}
         </div>
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <div className="px-3 py-2 bg-zinc-900/50 border-t border-zinc-800 rounded-b">
-          <pre className="text-xs text-zinc-300 whitespace-pre-wrap break-all font-mono">
-            {preview || "(empty)"}
+        <div className="bg-zinc-900/50 border-t border-zinc-800 rounded-b">
+          <pre className="text-xs text-zinc-200 whitespace-pre font-mono overflow-x-auto max-h-[480px] overflow-y-auto p-4 leading-relaxed">
+            {content || "(empty)"}
           </pre>
         </div>
       </CollapsibleContent>

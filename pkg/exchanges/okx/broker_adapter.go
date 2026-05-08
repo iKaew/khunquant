@@ -15,6 +15,16 @@ import (
 	"github.com/cryptoquantumwave/khunquant/pkg/providers/broker"
 )
 
+// catchPanic converts a CCXT panic (which the library uses instead of returning errors) into a Go error.
+func catchPanic(fn func() error) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("%v", r)
+		}
+	}()
+	return fn()
+}
+
 // OKXBrokerAdapter wraps OKXExchange with the broker.Provider hierarchy.
 type OKXBrokerAdapter struct {
 	*OKXExchange
@@ -94,25 +104,29 @@ func (a *OKXBrokerAdapter) SupportedWalletTypes() []string {
 
 // --- broker.MarketDataProvider ---
 
-func (a *OKXBrokerAdapter) FetchTicker(_ context.Context, symbol string) (ccxt.Ticker, error) {
-	return a.publicClient.FetchTicker(symbol)
+func (a *OKXBrokerAdapter) FetchTicker(_ context.Context, symbol string) (t ccxt.Ticker, err error) {
+	err = catchPanic(func() error { t, err = a.publicClient.FetchTicker(symbol); return err })
+	return
 }
 
-func (a *OKXBrokerAdapter) FetchTickers(_ context.Context, symbols []string) (map[string]ccxt.Ticker, error) {
+func (a *OKXBrokerAdapter) FetchTickers(_ context.Context, symbols []string) (result map[string]ccxt.Ticker, err error) {
 	var tickers ccxt.Tickers
-	var err error
-	if len(symbols) == 0 {
-		tickers, err = a.publicClient.FetchTickers()
-	} else {
-		tickers, err = a.publicClient.FetchTickers(ccxt.WithFetchTickersSymbols(symbols))
-	}
+	err = catchPanic(func() error {
+		var e error
+		if len(symbols) == 0 {
+			tickers, e = a.publicClient.FetchTickers()
+		} else {
+			tickers, e = a.publicClient.FetchTickers(ccxt.WithFetchTickersSymbols(symbols))
+		}
+		return e
+	})
 	if err != nil {
 		return nil, fmt.Errorf("okx: FetchTickers: %w", err)
 	}
 	return tickers.Tickers, nil
 }
 
-func (a *OKXBrokerAdapter) FetchOHLCV(_ context.Context, symbol, timeframe string, since *int64, limit int) ([]ccxt.OHLCV, error) {
+func (a *OKXBrokerAdapter) FetchOHLCV(_ context.Context, symbol, timeframe string, since *int64, limit int) (out []ccxt.OHLCV, err error) {
 	opts := []ccxt.FetchOHLCVOptions{ccxt.WithFetchOHLCVTimeframe(timeframe)}
 	if since != nil {
 		opts = append(opts, ccxt.WithFetchOHLCVSince(*since))
@@ -120,23 +134,30 @@ func (a *OKXBrokerAdapter) FetchOHLCV(_ context.Context, symbol, timeframe strin
 	if limit > 0 {
 		opts = append(opts, ccxt.WithFetchOHLCVLimit(int64(limit)))
 	}
-	return a.publicClient.FetchOHLCV(symbol, opts...)
+	err = catchPanic(func() error { out, err = a.publicClient.FetchOHLCV(symbol, opts...); return err })
+	return
 }
 
-func (a *OKXBrokerAdapter) FetchOrderBook(_ context.Context, symbol string, depth int) (ccxt.OrderBook, error) {
-	if depth > 0 {
-		return a.publicClient.FetchOrderBook(symbol, ccxt.WithFetchOrderBookLimit(int64(depth)))
-	}
-	return a.publicClient.FetchOrderBook(symbol)
+func (a *OKXBrokerAdapter) FetchOrderBook(_ context.Context, symbol string, depth int) (ob ccxt.OrderBook, err error) {
+	err = catchPanic(func() error {
+		if depth > 0 {
+			ob, err = a.publicClient.FetchOrderBook(symbol, ccxt.WithFetchOrderBookLimit(int64(depth)))
+		} else {
+			ob, err = a.publicClient.FetchOrderBook(symbol)
+		}
+		return err
+	})
+	return
 }
 
-func (a *OKXBrokerAdapter) LoadMarkets(_ context.Context) (map[string]ccxt.MarketInterface, error) {
-	return a.publicClient.LoadMarkets()
+func (a *OKXBrokerAdapter) LoadMarkets(_ context.Context) (m map[string]ccxt.MarketInterface, err error) {
+	err = catchPanic(func() error { m, err = a.publicClient.LoadMarkets(); return err })
+	return
 }
 
 // --- broker.TradingProvider ---
 
-func (a *OKXBrokerAdapter) CreateOrder(_ context.Context, symbol, orderType, side string, amount float64, price *float64, params map[string]interface{}) (ccxt.Order, error) {
+func (a *OKXBrokerAdapter) CreateOrder(_ context.Context, symbol, orderType, side string, amount float64, price *float64, params map[string]interface{}) (o ccxt.Order, err error) {
 	opts := []ccxt.CreateOrderOptions{}
 	if price != nil {
 		opts = append(opts, ccxt.WithCreateOrderPrice(*price))
@@ -144,25 +165,33 @@ func (a *OKXBrokerAdapter) CreateOrder(_ context.Context, symbol, orderType, sid
 	if len(params) > 0 {
 		opts = append(opts, ccxt.WithCreateOrderParams(params))
 	}
-	return a.client.CreateOrder(symbol, orderType, side, amount, opts...)
+	err = catchPanic(func() error { o, err = a.client.CreateOrder(symbol, orderType, side, amount, opts...); return err })
+	return
 }
 
-func (a *OKXBrokerAdapter) CancelOrder(_ context.Context, id, symbol string) (ccxt.Order, error) {
-	return a.client.CancelOrder(id, ccxt.WithCancelOrderSymbol(symbol))
+func (a *OKXBrokerAdapter) CancelOrder(_ context.Context, id, symbol string) (o ccxt.Order, err error) {
+	err = catchPanic(func() error { o, err = a.client.CancelOrder(id, ccxt.WithCancelOrderSymbol(symbol)); return err })
+	return
 }
 
-func (a *OKXBrokerAdapter) FetchOrder(_ context.Context, id, symbol string) (ccxt.Order, error) {
-	return a.client.FetchOrder(id, ccxt.WithFetchOrderSymbol(symbol))
+func (a *OKXBrokerAdapter) FetchOrder(_ context.Context, id, symbol string) (o ccxt.Order, err error) {
+	err = catchPanic(func() error { o, err = a.client.FetchOrder(id, ccxt.WithFetchOrderSymbol(symbol)); return err })
+	return
 }
 
-func (a *OKXBrokerAdapter) FetchOpenOrders(_ context.Context, symbol string) ([]ccxt.Order, error) {
-	if symbol != "" {
-		return a.client.FetchOpenOrders(ccxt.WithFetchOpenOrdersSymbol(symbol))
-	}
-	return a.client.FetchOpenOrders()
+func (a *OKXBrokerAdapter) FetchOpenOrders(_ context.Context, symbol string) (orders []ccxt.Order, err error) {
+	err = catchPanic(func() error {
+		if symbol != "" {
+			orders, err = a.client.FetchOpenOrders(ccxt.WithFetchOpenOrdersSymbol(symbol))
+		} else {
+			orders, err = a.client.FetchOpenOrders()
+		}
+		return err
+	})
+	return
 }
 
-func (a *OKXBrokerAdapter) FetchClosedOrders(_ context.Context, symbol string, since *int64, limit int) ([]ccxt.Order, error) {
+func (a *OKXBrokerAdapter) FetchClosedOrders(_ context.Context, symbol string, since *int64, limit int) (orders []ccxt.Order, err error) {
 	opts := []ccxt.FetchClosedOrdersOptions{}
 	if symbol != "" {
 		opts = append(opts, ccxt.WithFetchClosedOrdersSymbol(symbol))
@@ -173,21 +202,24 @@ func (a *OKXBrokerAdapter) FetchClosedOrders(_ context.Context, symbol string, s
 	if limit > 0 {
 		opts = append(opts, ccxt.WithFetchClosedOrdersLimit(int64(limit)))
 	}
-	return a.client.FetchClosedOrders(opts...)
+	err = catchPanic(func() error { orders, err = a.client.FetchClosedOrders(opts...); return err })
+	return
 }
 
-func (a *OKXBrokerAdapter) FetchMyTrades(_ context.Context, symbol string, since *int64, limit int) ([]ccxt.Trade, error) {
-	opts := []ccxt.FetchMyTradesOptions{}
+func (a *OKXBrokerAdapter) FetchMyTrades(_ context.Context, symbol string, since *int64, limit int) (trades []ccxt.Trade, err error) {
+	// OKX /api/v5/trade/fills accepts at most 100 records per request.
+	if limit <= 0 || limit > 100 {
+		limit = 100
+	}
+	opts := []ccxt.FetchMyTradesOptions{ccxt.WithFetchMyTradesLimit(int64(limit))}
 	if symbol != "" {
 		opts = append(opts, ccxt.WithFetchMyTradesSymbol(symbol))
 	}
 	if since != nil {
 		opts = append(opts, ccxt.WithFetchMyTradesSince(*since))
 	}
-	if limit > 0 {
-		opts = append(opts, ccxt.WithFetchMyTradesLimit(int64(limit)))
-	}
-	return a.client.FetchMyTrades(opts...)
+	err = catchPanic(func() error { trades, err = a.client.FetchMyTrades(opts...); return err })
+	return
 }
 
 // --- broker.TransferProvider ---

@@ -141,6 +141,7 @@ func (t *GetPnLSummaryTool) Execute(ctx context.Context, args map[string]any) *T
 		}
 		var rows []row
 		var totalMktValue, totalUnrealized, totalRealized float64
+		var cashQty float64
 
 		for _, b := range balances {
 			asset := strings.ToUpper(b.Asset)
@@ -149,6 +150,7 @@ func (t *GetPnLSummaryTool) Execute(ctx context.Context, args map[string]any) *T
 				continue
 			}
 			if strings.EqualFold(asset, q) {
+				cashQty = qty
 				continue
 			}
 			if len(assetFilter) > 0 && !assetFilter[asset] {
@@ -169,7 +171,7 @@ func (t *GetPnLSummaryTool) Execute(ctx context.Context, args map[string]any) *T
 				r.unrealizedPct = pct
 			} else {
 				// Compute from trade history.
-				var tradeNote string
+				var notes []string
 				sym := asset + "/" + q
 
 				tp, hasTrades := p.(broker.TradingProvider)
@@ -178,20 +180,23 @@ func (t *GetPnLSummaryTool) Execute(ctx context.Context, args map[string]any) *T
 				var calcResult PnLResult
 				if hasTrades {
 					trades, terr := tp.FetchMyTrades(ctx, sym, nil, 200)
-					if terr == nil {
-						calcResult = ComputeAvgCost(trades)
-						if calcResult.TruncatedAt200 {
-							tradeNote = "200-fill cap"
-							tradeCapNote = true
-						}
+					if terr != nil {
+						notes = append(notes, "trade fetch failed: "+terr.Error())
 					} else {
-						tradeNote = "trade fetch failed"
+						calcResult = ComputeAvgCost(trades)
+						switch {
+						case calcResult.TruncatedAt200:
+							notes = append(notes, "200-fill cap")
+							tradeCapNote = true
+						case calcResult.Held.AvgCost == 0:
+							notes = append(notes, "no trade history")
+						}
 					}
 					if ref.ProviderID == "bitkub" {
 						bitkubNote = true
 					}
 				} else {
-					tradeNote = "trade history unavailable"
+					notes = append(notes, "trade history unavailable")
 				}
 
 				r.avgCost = calcResult.Held.AvgCost
@@ -200,17 +205,28 @@ func (t *GetPnLSummaryTool) Execute(ctx context.Context, args map[string]any) *T
 					r.realized = calcResult.Realized
 				}
 
+				var priceErr error
 				if hasPrice {
 					ticker, terr := md.FetchTicker(ctx, sym)
 					if terr == nil && ticker.Last != nil {
 						r.price = *ticker.Last
+					} else if terr != nil {
+						priceErr = terr
 					}
 				}
 				if r.price == 0 {
-					// fallback to FetchPrice
 					fp, ferr := pp.FetchPrice(ctx, asset, q)
 					if ferr == nil && fp > 0 {
 						r.price = fp
+					} else if ferr != nil {
+						priceErr = ferr
+					}
+				}
+				if r.price == 0 {
+					if priceErr != nil {
+						notes = append(notes, "price unavailable: "+priceErr.Error())
+					} else {
+						notes = append(notes, "price unavailable")
 					}
 				}
 
@@ -223,7 +239,9 @@ func (t *GetPnLSummaryTool) Execute(ctx context.Context, args map[string]any) *T
 						}
 					}
 				}
-				r.note = tradeNote
+				if len(notes) > 0 {
+					r.note = strings.Join(notes, ", ")
+				}
 			}
 
 			rows = append(rows, r)
@@ -238,8 +256,12 @@ func (t *GetPnLSummaryTool) Execute(ctx context.Context, args map[string]any) *T
 		header := fmt.Sprintf("%s (%s)", ref.ProviderID, ref.Account)
 		sb.WriteString(fmt.Sprintf("\n=== %s — %s ===\n\n", header, q))
 
+		if cashQty > 0 {
+			sb.WriteString(fmt.Sprintf("  Cash (%s):      %s %s\n\n", q, formatAmount(cashQty), q))
+		}
+
 		if len(rows) == 0 {
-			sb.WriteString("  No holdings found.\n")
+			sb.WriteString("  No other holdings found.\n")
 			continue
 		}
 
@@ -293,7 +315,8 @@ func (t *GetPnLSummaryTool) Execute(ctx context.Context, args map[string]any) *T
 
 		sb.WriteString(sepLine + "\n")
 
-		// Subtotals.
+		// Subtotals — include cash in market value.
+		totalMktValue += cashQty
 		totalUnrealSign := pnlSignStr(totalUnrealized)
 		totalUnrealPct := 0.0
 		if totalMktValue-totalUnrealized > 0 {
@@ -345,6 +368,8 @@ func walletTypeForPnL(providerID string) string {
 	switch providerID {
 	case "settrade":
 		return "stock"
+	case "okx", "binance":
+		return "all"
 	default:
 		return "spot"
 	}

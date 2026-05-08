@@ -101,9 +101,28 @@ func (p *CodexProvider) Chat(
 	defer stream.Close()
 
 	var resp *responses.Response
+	var streamedContent strings.Builder
+	var streamedToolCalls []ToolCall
+	streamedToolCallIDs := make(map[string]struct{})
 	for stream.Next() {
 		evt := stream.Current()
-		if evt.Type == "response.completed" || evt.Type == "response.failed" || evt.Type == "response.incomplete" {
+		switch evt.Type {
+		case "response.output_text.delta":
+			streamedContent.WriteString(evt.Delta)
+		case "response.output_text.done":
+			if streamedContent.Len() == 0 && evt.Text != "" {
+				streamedContent.WriteString(evt.Text)
+			}
+		case "response.output_item.done":
+			if evt.Item.Type == "message" && streamedContent.Len() == 0 {
+				streamedContent.WriteString(codexMessageContent(evt.Item.Content))
+			}
+			if evt.Item.Type == "function_call" {
+				if tc, ok := codexToolCallFromParts(evt.Item.CallID, evt.Item.Name, evt.Item.Arguments); ok {
+					streamedToolCalls = appendUniqueCodexToolCall(streamedToolCalls, streamedToolCallIDs, tc)
+				}
+			}
+		case "response.completed", "response.failed", "response.incomplete":
 			evtResp := evt.Response
 			if evtResp.ID != "" {
 				evtRespCopy := evtResp
@@ -154,7 +173,27 @@ func (p *CodexProvider) Chat(
 		return nil, fmt.Errorf("codex API call: stream ended without completed response")
 	}
 
-	return parseCodexResponse(resp), nil
+	parsed := parseCodexResponse(resp)
+	if streamedContent.Len() > 0 {
+		parsed.Content = streamedContent.String()
+	}
+	if len(streamedToolCalls) > 0 {
+		parsed.ToolCalls = streamedToolCalls
+		parsed.FinishReason = "tool_calls"
+	}
+	return parsed, nil
+}
+
+func appendUniqueCodexToolCall(toolCalls []ToolCall, seen map[string]struct{}, tc ToolCall) []ToolCall {
+	key := tc.ID
+	if key == "" {
+		key = tc.Name
+	}
+	if _, ok := seen[key]; ok {
+		return toolCalls
+	}
+	seen[key] = struct{}{}
+	return append(toolCalls, tc)
 }
 
 func (p *CodexProvider) GetDefaultModel() string {
@@ -378,15 +417,9 @@ func parseCodexResponse(resp *responses.Response) *LLMResponse {
 				}
 			}
 		case "function_call":
-			var args map[string]any
-			if err := json.Unmarshal([]byte(item.Arguments), &args); err != nil {
-				args = map[string]any{"raw": item.Arguments}
+			if tc, ok := codexToolCallFromParts(item.CallID, item.Name, item.Arguments); ok {
+				toolCalls = append(toolCalls, tc)
 			}
-			toolCalls = append(toolCalls, ToolCall{
-				ID:        item.CallID,
-				Name:      item.Name,
-				Arguments: args,
-			})
 		}
 	}
 
@@ -413,6 +446,34 @@ func parseCodexResponse(resp *responses.Response) *LLMResponse {
 		FinishReason: finishReason,
 		Usage:        usage,
 	}
+}
+
+func codexMessageContent(parts []responses.ResponseOutputMessageContentUnion) string {
+	var content strings.Builder
+	for _, c := range parts {
+		if c.Type == "output_text" {
+			content.WriteString(c.Text)
+		}
+	}
+	return content.String()
+}
+
+func codexToolCallFromParts(callID, name, arguments string) (ToolCall, bool) {
+	if name == "" {
+		return ToolCall{}, false
+	}
+	if callID == "" {
+		callID = name
+	}
+	var args map[string]any
+	if err := json.Unmarshal([]byte(arguments), &args); err != nil {
+		args = map[string]any{"raw": arguments}
+	}
+	return ToolCall{
+		ID:        callID,
+		Name:      name,
+		Arguments: args,
+	}, true
 }
 
 func createCodexTokenSource() func() (string, string, error) {

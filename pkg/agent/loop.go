@@ -8,6 +8,7 @@ package agent
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1844,13 +1845,16 @@ func (al *AgentLoop) runLLMIteration(
 			}
 			contentForLLM := r.result.ContentForLLM()
 
-			resultPreview := strings.NewReplacer("\n", " ", "\r", "", `"`, "'").Replace(utils.Truncate(contentForLLM, 500))
+			resultFull := utils.Truncate(contentForLLM, 5000)
+			resultPreview := strings.NewReplacer("\n", " ", "\r", "", `"`, "'").Replace(utils.Truncate(contentForLLM, 200))
+			resultB64 := base64.StdEncoding.EncodeToString([]byte(resultFull))
 			logger.InfoCF("agent", fmt.Sprintf("Tool result: %s", r.tc.Name),
 				map[string]any{
 					"agent_id":       agent.ID,
 					"tool":           r.tc.Name,
 					"iteration":      iteration,
 					"result_preview": resultPreview,
+					"result_b64":     resultB64,
 					"has_error":      r.result.Err != nil,
 				})
 

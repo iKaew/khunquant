@@ -13,6 +13,7 @@ export type ToolResultEntry = {
   time: string
   tool: string
   resultPreview: string
+  resultFull: string
   hasError: boolean
   rawLine: string
 }
@@ -55,11 +56,21 @@ export function parseToolLogs(lines: string[]): ToolLogEntry[] {
       const tool = resultMatch[1]
       const fields = parseFields(line)
       const timeMatch = line.match(/^(\d{2}:\d{2}:\d{2})/)
+      const b64 = fields["result_b64"] ?? ""
+      let resultFull = ""
+      if (b64) {
+        try {
+          resultFull = atob(b64)
+        } catch {
+          // fall through to preview
+        }
+      }
       entries.push({
         kind: "result",
         time: timeMatch?.[1] ?? "",
         tool,
         resultPreview: fields["result_preview"] ?? "",
+        resultFull: resultFull || fields["result_preview"] || "",
         hasError: fields["has_error"] === "true",
         rawLine,
       })
