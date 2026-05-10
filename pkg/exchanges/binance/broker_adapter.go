@@ -6,6 +6,7 @@ package binance
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	ccxt "github.com/ccxt/ccxt/go/v4"
@@ -19,10 +20,13 @@ import (
 func catchPanic(fn func() error) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			err = fmt.Errorf("%v", r)
+			err = errors.New(compactCCXTMessage(fmt.Sprint(r)))
 		}
 	}()
-	return fn()
+	if err := fn(); err != nil {
+		return compactCCXTError(err)
+	}
+	return nil
 }
 
 // BinanceBrokerAdapter wraps BinanceExchange with the broker.Provider hierarchy.

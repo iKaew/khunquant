@@ -18,11 +18,23 @@ import (
 	"github.com/cryptoquantumwave/khunquant/pkg/providers/broker"
 )
 
+const maxBitkubOrderHistoryLimit = 100
+
 // normalizeSymbol converts unified CCXT format (e.g. "BTC/THB") to the
 // Bitkub API format (e.g. "BTC_THB"). Already-normalized symbols are
 // returned unchanged, so callers can safely pass either form.
 func normalizeSymbol(symbol string) string {
 	return strings.ReplaceAll(symbol, "/", "_")
+}
+
+func normalizeOrderHistoryLimit(limit int) int {
+	if limit <= 0 {
+		return 20
+	}
+	if limit > maxBitkubOrderHistoryLimit {
+		return maxBitkubOrderHistoryLimit
+	}
+	return limit
 }
 
 // BitkubBrokerAdapter wraps BitkubExchange with the broker.Provider hierarchy.
@@ -326,9 +338,7 @@ func (a *BitkubBrokerAdapter) FetchOpenOrders(ctx context.Context, symbol string
 // since and limit are supported; since is converted to a page-1 request.
 func (a *BitkubBrokerAdapter) FetchClosedOrders(ctx context.Context, symbol string, _ *int64, limit int) ([]ccxt.Order, error) {
 	sym := normalizeSymbol(symbol)
-	if limit <= 0 || limit > 100 {
-		limit = 20
-	}
+	limit = normalizeOrderHistoryLimit(limit)
 	orders, err := a.fetchOrderHistory(ctx, sym, 1, limit)
 	if err != nil {
 		return nil, err
@@ -345,9 +355,7 @@ func (a *BitkubBrokerAdapter) FetchClosedOrders(ctx context.Context, symbol stri
 // is treated as a single trade.
 func (a *BitkubBrokerAdapter) FetchMyTrades(ctx context.Context, symbol string, _ *int64, limit int) ([]ccxt.Trade, error) {
 	sym := normalizeSymbol(symbol)
-	if limit <= 0 || limit > 100 {
-		limit = 20
-	}
+	limit = normalizeOrderHistoryLimit(limit)
 	orders, err := a.fetchOrderHistory(ctx, sym, 1, limit)
 	if err != nil {
 		return nil, err

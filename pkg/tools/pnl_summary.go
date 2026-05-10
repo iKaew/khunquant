@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -128,16 +129,16 @@ func (t *GetPnLSummaryTool) Execute(ctx context.Context, args map[string]any) *T
 
 		// Filter to non-zero, non-quote assets matching optional filter.
 		type row struct {
-			asset        string
-			qty          float64
-			avgCost      float64
-			price        float64
-			mktValue     float64
-			unrealized   float64
+			asset         string
+			qty           float64
+			avgCost       float64
+			price         float64
+			mktValue      float64
+			unrealized    float64
 			unrealizedPct float64
-			realized     float64
-			fees         float64
-			note         string
+			realized      float64
+			fees          float64
+			note          string
 		}
 		var rows []row
 		var totalMktValue, totalUnrealized, totalRealized float64
@@ -188,8 +189,10 @@ func (t *GetPnLSummaryTool) Execute(ctx context.Context, args map[string]any) *T
 						case calcResult.TruncatedAt200:
 							notes = append(notes, "200-fill cap")
 							tradeCapNote = true
-						case calcResult.Held.AvgCost == 0:
+						case calcResult.TradeCount == 0:
 							notes = append(notes, "no trade history")
+						case calcResult.Held.AvgCost == 0:
+							notes = append(notes, "no open cost basis in returned trade history")
 						}
 					}
 					if ref.ProviderID == "bitkub" {
@@ -203,6 +206,10 @@ func (t *GetPnLSummaryTool) Execute(ctx context.Context, args map[string]any) *T
 				r.fees = calcResult.Fees
 				if includeRealized {
 					r.realized = calcResult.Realized
+				}
+				if r.avgCost > 0 && quantitiesDiffer(calcResult.Held.Qty, qty) {
+					notes = append(notes, fmt.Sprintf("history held %s %s vs wallet %s %s",
+						formatAmount(calcResult.Held.Qty), asset, formatAmount(qty), asset))
 				}
 
 				var priceErr error
@@ -233,9 +240,9 @@ func (t *GetPnLSummaryTool) Execute(ctx context.Context, args map[string]any) *T
 				if r.price > 0 {
 					r.mktValue = qty * r.price
 					if r.avgCost > 0 {
-						r.unrealized = (r.price - r.avgCost) * calcResult.Held.Qty
-						if r.avgCost*calcResult.Held.Qty > 0 {
-							r.unrealizedPct = r.unrealized / (r.avgCost * calcResult.Held.Qty) * 100
+						r.unrealized = (r.price - r.avgCost) * qty
+						if r.avgCost*qty > 0 {
+							r.unrealizedPct = r.unrealized / (r.avgCost * qty) * 100
 						}
 					}
 				}
@@ -391,4 +398,16 @@ func pnlSignStr(f float64) string {
 		return "+"
 	}
 	return ""
+}
+
+func quantitiesDiffer(a, b float64) bool {
+	diff := math.Abs(a - b)
+	if diff < 1e-8 {
+		return false
+	}
+	larger := math.Max(math.Abs(a), math.Abs(b))
+	if larger == 0 {
+		return false
+	}
+	return diff/larger > 0.01
 }

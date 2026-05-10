@@ -24,6 +24,17 @@ function stripAnsi(s: string): string {
   return s.replace(ANSI_PATTERN, "")
 }
 
+function decodeBase64Utf8(b64: string): string {
+  const binary = atob(b64)
+  const bytes = new Uint8Array(binary.length)
+
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i)
+  }
+
+  return new TextDecoder().decode(bytes)
+}
+
 function parseFields(line: string): Record<string, string> {
   const fields: Record<string, string> = {}
   const re = /(\w+)=(?:"([^"]*)"|([\S]+))/g
@@ -60,7 +71,7 @@ export function parseToolLogs(lines: string[]): ToolLogEntry[] {
       let resultFull = ""
       if (b64) {
         try {
-          resultFull = atob(b64)
+          resultFull = decodeBase64Utf8(b64)
         } catch {
           // fall through to preview
         }

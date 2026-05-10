@@ -387,3 +387,15 @@ func TestPnlSignStr_Negative(t *testing.T) {
 		t.Errorf("pnlSignStr(-1.0) = %q, want empty", got)
 	}
 }
+
+func TestQuantitiesDiffer(t *testing.T) {
+	if quantitiesDiffer(100, 100.5) {
+		t.Fatal("0.5% quantity difference should be ignored")
+	}
+	if !quantitiesDiffer(6.59, 14.86) {
+		t.Fatal("large quantity difference should be reported")
+	}
+	if quantitiesDiffer(0, 0) {
+		t.Fatal("zero quantities should not differ")
+	}
+}

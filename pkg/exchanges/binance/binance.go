@@ -198,9 +198,10 @@ func (b *BinanceExchange) FetchPrice(_ context.Context, asset, quote string) (fl
 }
 
 // getAllBalances aggregates balances across all wallet types.
-// Individual wallet errors are skipped when at least one wallet succeeds (e.g.
-// futures not enabled), but an all-wallet failure is returned so bad
-// credentials do not look like an empty portfolio.
+// Individual wallet errors are skipped when at least one wallet returns
+// balances (e.g. futures not enabled), but failures are returned when no
+// balances are found so API/credential issues do not look like an empty
+// portfolio.
 //
 // LD-prefixed earn tokens (e.g. LDBTC, LDBNB) are stripped from every wallet
 // type in this aggregated view. Binance includes Simple Earn Flexible positions
@@ -227,7 +228,7 @@ func collectAllWalletBalances(ctx context.Context, walletTypes []string, fetch f
 	for _, wt := range walletTypes {
 		wb, err := fetch(ctx, wt)
 		if err != nil {
-			errs = append(errs, err)
+			errs = append(errs, compactCCXTError(err))
 			continue
 		}
 		successes++
@@ -236,7 +237,27 @@ func collectAllWalletBalances(ctx context.Context, walletTypes []string, fetch f
 	if successes == 0 && len(errs) > 0 {
 		return nil, fmt.Errorf("binance: all wallet balance fetches failed: %w", errors.Join(errs...))
 	}
+	if len(all) == 0 && len(errs) > 0 {
+		return nil, fmt.Errorf("binance: no wallet balances found and some wallet fetches failed: %w", errors.Join(errs...))
+	}
 	return all, nil
+}
+
+func compactCCXTError(err error) error {
+	if err == nil {
+		return nil
+	}
+	return errors.New(compactCCXTMessage(err.Error()))
+}
+
+func compactCCXTMessage(msg string) string {
+	for _, marker := range []string{"\nStack trace:", "Stack trace:"} {
+		if idx := strings.Index(msg, marker); idx >= 0 {
+			msg = msg[:idx]
+			break
+		}
+	}
+	return strings.TrimSpace(msg)
 }
 
 // filterOutLDTokens removes LD-prefixed Simple Earn tokens (e.g. LDBTC) from
@@ -258,7 +279,7 @@ func filterOutLDTokens(balances []exchanges.WalletBalance) []exchanges.WalletBal
 func (b *BinanceExchange) getSpotBalances(_ context.Context) ([]exchanges.WalletBalance, error) {
 	bal, err := b.spot.FetchBalance(map[string]interface{}{"type": "spot"})
 	if err != nil {
-		return nil, fmt.Errorf("spot: %w", err)
+		return nil, fmt.Errorf("spot: %w", compactCCXTError(err))
 	}
 	return walletBalancesFromCCXT(bal, "spot"), nil
 }
@@ -267,7 +288,7 @@ func (b *BinanceExchange) getSpotBalances(_ context.Context) ([]exchanges.Wallet
 func (b *BinanceExchange) getFundingBalances(_ context.Context) ([]exchanges.WalletBalance, error) {
 	bal, err := b.spot.FetchBalance(map[string]interface{}{"type": "funding"})
 	if err != nil {
-		return nil, fmt.Errorf("funding: %w", err)
+		return nil, fmt.Errorf("funding: %w", compactCCXTError(err))
 	}
 	return walletBalancesFromCCXT(bal, "funding"), nil
 }
@@ -276,7 +297,7 @@ func (b *BinanceExchange) getFundingBalances(_ context.Context) ([]exchanges.Wal
 func (b *BinanceExchange) getFuturesUSDTBalances(_ context.Context) ([]exchanges.WalletBalance, error) {
 	bal, err := b.usdm.FetchBalance()
 	if err != nil {
-		return nil, fmt.Errorf("futures_usdt: %w", err)
+		return nil, fmt.Errorf("futures_usdt: %w", compactCCXTError(err))
 	}
 	return walletBalancesFromCCXT(bal, "futures_usdt"), nil
 }
@@ -285,7 +306,7 @@ func (b *BinanceExchange) getFuturesUSDTBalances(_ context.Context) ([]exchanges
 func (b *BinanceExchange) getFuturesCoinBalances(_ context.Context) ([]exchanges.WalletBalance, error) {
 	bal, err := b.coinm.FetchBalance()
 	if err != nil {
-		return nil, fmt.Errorf("futures_coin: %w", err)
+		return nil, fmt.Errorf("futures_coin: %w", compactCCXTError(err))
 	}
 	return walletBalancesFromCCXT(bal, "futures_coin"), nil
 }
@@ -294,7 +315,7 @@ func (b *BinanceExchange) getFuturesCoinBalances(_ context.Context) ([]exchanges
 func (b *BinanceExchange) getMarginBalances(_ context.Context) ([]exchanges.WalletBalance, error) {
 	bal, err := b.spot.FetchBalance(map[string]interface{}{"type": "margin"})
 	if err != nil {
-		return nil, fmt.Errorf("margin: %w", err)
+		return nil, fmt.Errorf("margin: %w", compactCCXTError(err))
 	}
 	return walletBalancesFromCCXT(bal, "margin"), nil
 }
@@ -312,7 +333,7 @@ func (b *BinanceExchange) getEarnFlexibleBalances(_ context.Context) ([]exchange
 		}
 		res := <-b.spot.SapiGetSimpleEarnFlexiblePosition(params)
 		if ccxt.IsError(res) {
-			return nil, fmt.Errorf("earn_flexible: %w", ccxt.CreateReturnError(res))
+			return nil, fmt.Errorf("earn_flexible: %w", compactCCXTError(ccxt.CreateReturnError(res)))
 		}
 
 		resp, ok := res.(map[string]interface{})
@@ -371,7 +392,7 @@ func (b *BinanceExchange) getEarnLockedBalances(_ context.Context) ([]exchanges.
 		}
 		res := <-b.spot.SapiGetSimpleEarnLockedPosition(params)
 		if ccxt.IsError(res) {
-			return nil, fmt.Errorf("earn_locked: %w", ccxt.CreateReturnError(res))
+			return nil, fmt.Errorf("earn_locked: %w", compactCCXTError(ccxt.CreateReturnError(res)))
 		}
 
 		resp, ok := res.(map[string]interface{})
