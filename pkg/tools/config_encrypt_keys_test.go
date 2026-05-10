@@ -2,15 +2,43 @@ package tools
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/cryptoquantumwave/khunquant/pkg/config"
+	"github.com/cryptoquantumwave/khunquant/pkg/credential"
 )
 
 func newTestConfigEncryptKeysTool(t *testing.T) *ConfigEncryptKeysTool {
 	t.Helper()
+	isolateConfigEncryptKeysTest(t)
 	return NewConfigEncryptKeysTool(config.DefaultConfig())
+}
+
+func isolateConfigEncryptKeysTest(t *testing.T) {
+	t.Helper()
+
+	tmp := t.TempDir()
+	home := filepath.Join(tmp, "home")
+	khunquantHome := filepath.Join(tmp, "khunquant-home")
+	configPath := filepath.Join(khunquantHome, "config.json")
+	sshKeyPath := filepath.Join(home, ".ssh", "khunquant_ed25519.key")
+
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("KHUNQUANT_HOME", khunquantHome)
+	t.Setenv("KHUNQUANT_CONFIG", configPath)
+	t.Setenv(credential.SSHKeyPathEnvVar, sshKeyPath)
+	t.Setenv(credential.PassphraseEnvVar, "")
+
+	if err := os.MkdirAll(khunquantHome, 0o700); err != nil {
+		t.Fatalf("MkdirAll(KHUNQUANT_HOME): %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("{}"), 0o600); err != nil {
+		t.Fatalf("WriteFile(config): %v", err)
+	}
 }
 
 func TestConfigEncryptKeysTool_Name(t *testing.T) {

@@ -2,6 +2,7 @@ package binance
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -197,7 +198,9 @@ func (b *BinanceExchange) FetchPrice(_ context.Context, asset, quote string) (fl
 }
 
 // getAllBalances aggregates balances across all wallet types.
-// Individual wallet errors are silently skipped (e.g. futures not enabled).
+// Individual wallet errors are skipped when at least one wallet succeeds (e.g.
+// futures not enabled), but an all-wallet failure is returned so bad
+// credentials do not look like an empty portfolio.
 //
 // LD-prefixed earn tokens (e.g. LDBTC, LDBNB) are stripped from every wallet
 // type in this aggregated view. Binance includes Simple Earn Flexible positions
@@ -208,13 +211,30 @@ func (b *BinanceExchange) FetchPrice(_ context.Context, asset, quote string) (fl
 // Requesting earn_flexible or spot directly still returns the raw LD token list.
 func (b *BinanceExchange) getAllBalances(ctx context.Context) ([]exchanges.WalletBalance, error) {
 	walletTypes := []string{"spot", "funding", "futures_usdt", "futures_coin", "margin", "earn_flexible", "earn_locked"}
-	var all []exchanges.WalletBalance
-	for _, wt := range walletTypes {
+	return collectAllWalletBalances(ctx, walletTypes, func(ctx context.Context, wt string) ([]exchanges.WalletBalance, error) {
 		wb, err := b.GetWalletBalances(ctx, wt)
 		if err != nil {
-			continue // wallet not enabled or no access — skip
+			return nil, err
 		}
-		all = append(all, filterOutLDTokens(wb)...)
+		return filterOutLDTokens(wb), nil
+	})
+}
+
+func collectAllWalletBalances(ctx context.Context, walletTypes []string, fetch func(context.Context, string) ([]exchanges.WalletBalance, error)) ([]exchanges.WalletBalance, error) {
+	var all []exchanges.WalletBalance
+	var errs []error
+	successes := 0
+	for _, wt := range walletTypes {
+		wb, err := fetch(ctx, wt)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		successes++
+		all = append(all, wb...)
+	}
+	if successes == 0 && len(errs) > 0 {
+		return nil, fmt.Errorf("binance: all wallet balance fetches failed: %w", errors.Join(errs...))
 	}
 	return all, nil
 }

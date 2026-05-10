@@ -2,9 +2,12 @@ package tools
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/cryptoquantumwave/khunquant/pkg/config"
+	"github.com/cryptoquantumwave/khunquant/pkg/providers/broker"
 )
 
 func newTestGetPnLSummaryTool(t *testing.T) *GetPnLSummaryTool {
@@ -158,11 +161,11 @@ func TestGetPnLSummaryTool_Execute_AllArgs(t *testing.T) {
 	tool := newTestGetPnLSummaryTool(t)
 
 	result := tool.Execute(context.Background(), map[string]any{
-		"provider":          "bitkub",
-		"account":           "trading",
-		"quote":             "THB",
-		"assets":            "BTC,ETH,DOGE",
-		"include_realized":  true,
+		"provider":         "bitkub",
+		"account":          "trading",
+		"quote":            "THB",
+		"assets":           "BTC,ETH,DOGE",
+		"include_realized": true,
 	})
 
 	if result == nil {
@@ -197,14 +200,64 @@ func TestGetPnLSummaryTool_Execute_InvalidArgTypes(t *testing.T) {
 	}
 }
 
+type pnlSummaryErrorPortfolioProvider struct{}
+
+func (p pnlSummaryErrorPortfolioProvider) ID() string { return "pnl-summary-error-provider" }
+
+func (p pnlSummaryErrorPortfolioProvider) Category() broker.AssetCategory {
+	return broker.CategoryCrypto
+}
+
+func (p pnlSummaryErrorPortfolioProvider) GetMarketStatus(context.Context, string) (broker.MarketStatus, error) {
+	return broker.MarketUnknown, nil
+}
+
+func (p pnlSummaryErrorPortfolioProvider) GetBalances(context.Context) ([]broker.Balance, error) {
+	return nil, errors.New("api credentials rejected")
+}
+
+func (p pnlSummaryErrorPortfolioProvider) GetWalletBalances(context.Context, string) ([]broker.WalletBalance, error) {
+	return nil, errors.New("api credentials rejected")
+}
+
+func (p pnlSummaryErrorPortfolioProvider) FetchPrice(context.Context, string, string) (float64, error) {
+	return 0, nil
+}
+
+func (p pnlSummaryErrorPortfolioProvider) SupportedWalletTypes() []string {
+	return []string{"all"}
+}
+
+func TestGetPnLSummaryTool_Execute_BalanceFetchErrorIsNotEmptyHoldings(t *testing.T) {
+	const provider = "pnl-summary-error-provider"
+	broker.RegisterFactory(provider, func(*config.Config) (broker.Provider, error) {
+		return pnlSummaryErrorPortfolioProvider{}, nil
+	})
+
+	tool := newTestGetPnLSummaryTool(t)
+	result := tool.Execute(context.Background(), map[string]any{
+		"provider": provider,
+		"account":  "main",
+	})
+	if result == nil {
+		t.Fatal("Execute should return result")
+	}
+	if !strings.Contains(result.ForLLM, "GetWalletBalances: api credentials rejected") {
+		t.Fatalf("result does not include balance fetch error: %q", result.ForLLM)
+	}
+	if strings.Contains(result.ForLLM, "No other holdings found") {
+		t.Fatalf("result should not report empty holdings on fetch error: %q", result.ForLLM)
+	}
+}
+
 func TestGetPnLSummaryTool_Execute_MultipleAssetFormats(t *testing.T) {
 	tool := newTestGetPnLSummaryTool(t)
 
 	testCases := []string{
 		"BTC,ETH",
-		"BTC, ETH, SOL",  // with spaces
-		"btc,eth",        // lowercase
-		"BTC",            // single asset
+		"BTC, ETH, SOL", // with spaces
+		"btc,eth",       // lowercase
+		"BTC",           // single asset
 	}
 
 	for _, assets := range testCases {
