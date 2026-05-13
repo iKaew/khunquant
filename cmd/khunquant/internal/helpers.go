@@ -11,11 +11,15 @@ const Logo = "🦞"
 
 // GetKhunquantHome returns the khunquant home directory.
 // Priority: $KHUNQUANT_HOME > ~/.khunquant
+// Returns "" if the user home directory cannot be resolved.
 func GetKhunquantHome() string {
 	if home := os.Getenv("KHUNQUANT_HOME"); home != "" {
 		return home
 	}
-	home, _ := os.UserHomeDir()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
 	return filepath.Join(home, ".khunquant")
 }
 

@@ -1,8 +1,15 @@
 package config
 
 import (
-	"gopkg.in/yaml.v3"
+	"errors"
+	"os"
+	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
+
+	"github.com/cryptoquantumwave/khunquant/pkg/credential"
+	"gopkg.in/yaml.v3"
 )
 
 func TestSecureString_MarshalYAML_PlaintextValue(t *testing.T) {
@@ -30,6 +37,115 @@ func TestSecureString_MarshalYAML_EncryptedReference(t *testing.T) {
 	result := string(data)
 	if result != "enc://encrypted_value\n" {
 		t.Errorf("Expected to preserve enc:// reference, got %q", result)
+	}
+}
+
+func TestPrepareEncryptedCredentialsForRotation_ReencryptsExistingEncValues(t *testing.T) {
+	dir := t.TempDir()
+	sshKeyPath := filepath.Join(dir, "khunquant_ed25519.key")
+	if err := credential.GenerateSSHKey(sshKeyPath); err != nil {
+		t.Fatalf("GenerateSSHKey failed: %v", err)
+	}
+	t.Setenv(credential.SSHKeyPathEnvVar, sshKeyPath)
+
+	oldProvider := credential.PassphraseProvider
+	t.Cleanup(func() {
+		credential.PassphraseProvider = oldProvider
+	})
+
+	const (
+		oldPassphrase = "old-passphrase"
+		newPassphrase = "new-passphrase"
+		plaintext     = "telegram-token"
+	)
+
+	oldEncrypted, err := credential.Encrypt(oldPassphrase, "", plaintext)
+	if err != nil {
+		t.Fatalf("Encrypt failed: %v", err)
+	}
+
+	configPath := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(configPath, []byte(`{"channels":{"telegram":{"enabled":true}}}`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	securityPath := filepath.Join(dir, SecurityConfigFile)
+	securityYAML := "channels:\n  telegram:\n    token: " + oldEncrypted + "\n"
+	if err := os.WriteFile(securityPath, []byte(securityYAML), 0o600); err != nil {
+		t.Fatalf("write security config: %v", err)
+	}
+
+	credential.PassphraseProvider = func() string { return oldPassphrase }
+	cfg, err := LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig with old passphrase failed: %v", err)
+	}
+	if got := cfg.Channels.Telegram.Token.String(); got != plaintext {
+		t.Fatalf("loaded token = %q, want %q", got, plaintext)
+	}
+
+	credential.PassphraseProvider = func() string { return newPassphrase }
+	if rotated := cfg.PrepareEncryptedCredentialsForRotation(); rotated != 1 {
+		t.Fatalf("PrepareEncryptedCredentialsForRotation() = %d, want 1", rotated)
+	}
+	if err := SaveConfig(configPath, cfg); err != nil {
+		t.Fatalf("SaveConfig after rotation failed: %v", err)
+	}
+
+	rotatedSecurity, err := os.ReadFile(securityPath)
+	if err != nil {
+		t.Fatalf("read rotated security config: %v", err)
+	}
+	rotatedText := string(rotatedSecurity)
+	if !strings.Contains(rotatedText, "enc://") {
+		t.Fatalf("rotated security config does not contain encrypted credential:\n%s", rotatedText)
+	}
+	if strings.Contains(rotatedText, oldEncrypted) {
+		t.Fatalf("rotated security config still contains the old ciphertext")
+	}
+
+	credential.PassphraseProvider = func() string { return oldPassphrase }
+	if _, err := LoadConfig(configPath); err == nil || !errors.Is(err, credential.ErrDecryptionFailed) {
+		t.Fatalf("LoadConfig with old passphrase error = %v, want ErrDecryptionFailed", err)
+	}
+
+	credential.PassphraseProvider = func() string { return newPassphrase }
+	reloaded, err := LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig with new passphrase failed: %v", err)
+	}
+	if got := reloaded.Channels.Telegram.Token.String(); got != plaintext {
+		t.Fatalf("reloaded token = %q, want %q", got, plaintext)
+	}
+}
+
+func TestPrepareEncryptedCredentialsForRotation_MapValues(t *testing.T) {
+	type mapBackedSecrets struct {
+		Secrets map[string]SecureString
+	}
+	holder := mapBackedSecrets{
+		Secrets: map[string]SecureString{
+			"api": {
+				raw:      "enc://old-ciphertext",
+				resolved: "plain-secret",
+			},
+			"file": {
+				raw:      "file://secret.txt",
+				resolved: "plain-file-secret",
+			},
+		},
+	}
+
+	if rotated := prepareEncryptedCredentialsForRotation(reflect.ValueOf(&holder)); rotated != 1 {
+		t.Fatalf("prepareEncryptedCredentialsForRotation() = %d, want 1", rotated)
+	}
+	if got := holder.Secrets["api"].raw; got != "" {
+		t.Fatalf("map-backed enc raw = %q, want empty", got)
+	}
+	if got := holder.Secrets["api"].resolved; got != "plain-secret" {
+		t.Fatalf("map-backed resolved = %q, want %q", got, "plain-secret")
+	}
+	if got := holder.Secrets["file"].raw; got != "file://secret.txt" {
+		t.Fatalf("map-backed file raw = %q, want preserved file reference", got)
 	}
 }
 

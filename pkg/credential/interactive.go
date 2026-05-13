@@ -10,7 +10,13 @@ import (
 // PromptPassphrase interactively prompts for a passphrase with confirmation.
 // Uses terminal raw mode so the input is not echoed.
 func PromptPassphrase() (string, error) {
-	fmt.Print("Enter passphrase for credential encryption: ")
+	return PromptPassphraseWithLabel("Enter passphrase for credential encryption", true)
+}
+
+// PromptPassphraseWithLabel interactively prompts for a passphrase. When
+// confirm is true, the user must enter the same passphrase twice.
+func PromptPassphraseWithLabel(label string, confirm bool) (string, error) {
+	fmt.Printf("%s: ", label)
 	p1, err := term.ReadPassword(int(os.Stdin.Fd()))
 	fmt.Println()
 	if err != nil {
@@ -18,6 +24,9 @@ func PromptPassphrase() (string, error) {
 	}
 	if len(p1) == 0 {
 		return "", fmt.Errorf("passphrase must not be empty")
+	}
+	if !confirm {
+		return string(p1), nil
 	}
 
 	fmt.Print("Confirm passphrase: ")

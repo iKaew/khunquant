@@ -10,6 +10,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestGetKhunquantHomeReturnsAbsolutePath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("HOME override not reliable on Windows")
+	}
+	t.Setenv("KHUNQUANT_HOME", "")
+	t.Setenv("HOME", "/tmp/testhome")
+	got := GetKhunquantHome()
+	require.NotEmpty(t, got, "GetKhunquantHome() should not return empty string")
+	assert.True(t, filepath.IsAbs(got), "GetKhunquantHome() = %q, want absolute path", got)
+}
+
 func TestGetConfigPath(t *testing.T) {
 	t.Setenv("HOME", "/tmp/home")
 

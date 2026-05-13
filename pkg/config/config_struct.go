@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync"
@@ -138,6 +139,90 @@ func (s *SecureString) Set(value string) *SecureString {
 	s.resolved = value
 	s.raw = ""
 	return s
+}
+
+// PrepareEncryptedCredentialsForRotation makes already-decrypted enc:// secrets
+// eligible for re-encryption on the next SaveConfig call. SecureString normally
+// preserves enc:// raw values during YAML marshaling; rotation needs to keep the
+// resolved plaintext and discard only the encrypted raw wrapper.
+func (c *Config) PrepareEncryptedCredentialsForRotation() int {
+	if c == nil {
+		return 0
+	}
+	return prepareEncryptedCredentialsForRotation(reflect.ValueOf(c))
+}
+
+func (s *SecureString) prepareForEncryptionRotation() bool {
+	if s == nil || !strings.HasPrefix(s.raw, credential.EncScheme) {
+		return false
+	}
+	s.raw = ""
+	return true
+}
+
+func prepareEncryptedCredentialsForRotation(v reflect.Value) int {
+	if !v.IsValid() {
+		return 0
+	}
+
+	for v.Kind() == reflect.Interface {
+		if v.IsNil() {
+			return 0
+		}
+		v = v.Elem()
+	}
+
+	secureStringType := reflect.TypeOf(SecureString{})
+	if v.Kind() == reflect.Ptr {
+		if v.IsNil() {
+			return 0
+		}
+		if v.Type().Elem() == secureStringType {
+			if v.CanInterface() && v.Interface().(*SecureString).prepareForEncryptionRotation() {
+				return 1
+			}
+			return 0
+		}
+		return prepareEncryptedCredentialsForRotation(v.Elem())
+	}
+
+	if v.Type() == secureStringType {
+		if v.CanAddr() && v.Addr().CanInterface() && v.Addr().Interface().(*SecureString).prepareForEncryptionRotation() {
+			return 1
+		}
+		return 0
+	}
+
+	count := 0
+	switch v.Kind() {
+	case reflect.Struct:
+		t := v.Type()
+		for i := 0; i < v.NumField(); i++ {
+			if !t.Field(i).IsExported() {
+				continue
+			}
+			count += prepareEncryptedCredentialsForRotation(v.Field(i))
+		}
+	case reflect.Slice, reflect.Array:
+		for i := 0; i < v.Len(); i++ {
+			count += prepareEncryptedCredentialsForRotation(v.Index(i))
+		}
+	case reflect.Map:
+		for _, key := range v.MapKeys() {
+			elem := v.MapIndex(key)
+			if !elem.IsValid() {
+				continue
+			}
+			mutable := reflect.New(elem.Type()).Elem()
+			mutable.Set(elem)
+			rotated := prepareEncryptedCredentialsForRotation(mutable)
+			if rotated > 0 {
+				v.SetMapIndex(key, mutable)
+				count += rotated
+			}
+		}
+	}
+	return count
 }
 
 func (s SecureString) MarshalJSON() ([]byte, error) {
@@ -411,13 +496,13 @@ func (c *OKXExchangeConfig) UnmarshalYAML(value *yaml.Node) error {
 
 // --- Channel config IsZero helpers (used by yaml.v3 omitempty) ---
 
-func (c TelegramConfig) IsZero() bool    { return c.Token.String() == "" }
-func (c DiscordConfig) IsZero() bool     { return c.Token.String() == "" }
-func (c PicoConfig) IsZero() bool        { return c.Token.String() == "" }
-func (c QQConfig) IsZero() bool          { return c.AppSecret.String() == "" }
-func (c DingTalkConfig) IsZero() bool    { return c.ClientSecret.String() == "" }
-func (c MatrixConfig) IsZero() bool      { return c.AccessToken.String() == "" }
-func (c OneBotConfig) IsZero() bool      { return c.AccessToken.String() == "" }
+func (c TelegramConfig) IsZero() bool { return c.Token.String() == "" }
+func (c DiscordConfig) IsZero() bool  { return c.Token.String() == "" }
+func (c PicoConfig) IsZero() bool     { return c.Token.String() == "" }
+func (c QQConfig) IsZero() bool       { return c.AppSecret.String() == "" }
+func (c DingTalkConfig) IsZero() bool { return c.ClientSecret.String() == "" }
+func (c MatrixConfig) IsZero() bool   { return c.AccessToken.String() == "" }
+func (c OneBotConfig) IsZero() bool   { return c.AccessToken.String() == "" }
 
 func (c FeishuConfig) IsZero() bool {
 	return c.AppSecret.String() == "" && c.EncryptKey.String() == "" && c.VerificationToken.String() == ""

@@ -54,12 +54,14 @@ func TestConfigEncryptKeysTool_Description(t *testing.T) {
 	if desc == "" {
 		t.Error("Description() should not be empty")
 	}
-	if !strings.Contains(desc, "encrypt") {
-		t.Errorf("Description should mention encryption, got %q", desc)
+	for _, want := range []string{"khunquant auth encrypt", "does not accept passphrases"} {
+		if !strings.Contains(desc, want) {
+			t.Errorf("Description should mention %q, got %q", want, desc)
+		}
 	}
 }
 
-func TestConfigEncryptKeysTool_Parameters(t *testing.T) {
+func TestConfigEncryptKeysTool_ParametersDoNotAcceptSecrets(t *testing.T) {
 	tool := newTestConfigEncryptKeysTool(t)
 	params := tool.Parameters()
 
@@ -72,179 +74,56 @@ func TestConfigEncryptKeysTool_Parameters(t *testing.T) {
 		t.Fatal("properties should be a map")
 	}
 
-	expectedProps := []string{"passphrase", "rotate"}
-	for _, prop := range expectedProps {
-		if _, ok := props[prop]; !ok {
-			t.Errorf("expected property %q not found", prop)
+	for _, forbidden := range []string{"passphrase", "old_passphrase", "old_ssh_key_path"} {
+		if _, ok := props[forbidden]; ok {
+			t.Errorf("secret-bearing property %q should not be accepted", forbidden)
 		}
+	}
+	if _, ok := props["rotate"]; !ok {
+		t.Error("expected deprecated rotate property to remain documented")
 	}
 
 	required, ok := params["required"].([]string)
 	if !ok {
 		t.Fatal("required should be a slice")
 	}
-	if len(required) == 0 || required[0] != "passphrase" {
-		t.Errorf("passphrase should be required, got %v", required)
+	if len(required) != 0 {
+		t.Errorf("no secret args should be required, got %v", required)
 	}
 }
 
-func TestConfigEncryptKeysTool_Execute_EmptyPassphrase(t *testing.T) {
-	tool := newTestConfigEncryptKeysTool(t)
-
-	result := tool.Execute(context.Background(), map[string]any{
-		"passphrase": "",
-	})
-
-	if !result.IsError {
-		t.Error("empty passphrase should return error")
-	}
-	if !strings.Contains(result.ForLLM, "passphrase") {
-		t.Errorf("error should mention passphrase, got %q", result.ForLLM)
-	}
-}
-
-func TestConfigEncryptKeysTool_Execute_NoPassphrase(t *testing.T) {
+func TestConfigEncryptKeysTool_ExecuteRejectsInteractiveUseThroughTool(t *testing.T) {
 	tool := newTestConfigEncryptKeysTool(t)
 
 	result := tool.Execute(context.Background(), map[string]any{})
-
-	if !result.IsError {
-		t.Error("missing passphrase should return error")
-	}
-}
-
-func TestConfigEncryptKeysTool_Execute_MissingPassphrase(t *testing.T) {
-	tool := newTestConfigEncryptKeysTool(t)
-
-	result := tool.Execute(context.Background(), map[string]any{
-		"rotate": true,
-	})
-
-	if !result.IsError {
-		t.Error("missing passphrase should return error")
-	}
-}
-
-func TestConfigEncryptKeysTool_Execute_PassphraseWithoutRotate(t *testing.T) {
-	tool := newTestConfigEncryptKeysTool(t)
-
-	result := tool.Execute(context.Background(), map[string]any{
-		"passphrase": "test-secret-passphrase",
-		"rotate":     false,
-	})
-
-	// May error depending on credential state, but should handle the call
 	if result == nil {
 		t.Fatal("Execute should return result")
-	}
-}
-
-func TestConfigEncryptKeysTool_Execute_PassphraseWithRotate(t *testing.T) {
-	tool := newTestConfigEncryptKeysTool(t)
-
-	result := tool.Execute(context.Background(), map[string]any{
-		"passphrase": "test-secret-passphrase",
-		"rotate":     true,
-	})
-
-	// May error depending on credential state, but should handle the call
-	if result == nil {
-		t.Fatal("Execute should return result")
-	}
-}
-
-func TestConfigEncryptKeysTool_Execute_InvalidArgTypes(t *testing.T) {
-	tool := newTestConfigEncryptKeysTool(t)
-
-	result := tool.Execute(context.Background(), map[string]any{
-		"passphrase": 12345,   // int instead of string
-		"rotate":     "maybe", // string instead of bool
-	})
-
-	// Should handle type mismatches gracefully (ignore non-matching types)
-	if result == nil {
-		t.Fatal("Execute should return result even with invalid types")
 	}
 	if !result.IsError {
-		t.Log("Type mismatch caused expected error")
+		t.Fatal("tool execution should fail closed")
+	}
+	if !strings.Contains(result.ForLLM, "interactive") {
+		t.Fatalf("error should direct caller to interactive CLI, got %q", result.ForLLM)
 	}
 }
 
-func TestConfigEncryptKeysTool_Execute_LongPassphrase(t *testing.T) {
+func TestConfigEncryptKeysTool_ExecuteRejectsPassphraseArgs(t *testing.T) {
 	tool := newTestConfigEncryptKeysTool(t)
 
-	longPassphrase := strings.Repeat("x", 1000)
-	result := tool.Execute(context.Background(), map[string]any{
-		"passphrase": longPassphrase,
-	})
-
-	if result == nil {
-		t.Fatal("Execute should return result for long passphrase")
-	}
-	// Long passphrases should be acceptable
-}
-
-func TestConfigEncryptKeysTool_Execute_SpecialCharsPassphrase(t *testing.T) {
-	tool := newTestConfigEncryptKeysTool(t)
-
-	specialPassphrase := "p@$$w0rd!#$%^&*()[]{}|;:',.<>?/\\"
-	result := tool.Execute(context.Background(), map[string]any{
-		"passphrase": specialPassphrase,
-	})
-
-	if result == nil {
-		t.Fatal("Execute should return result for special chars passphrase")
-	}
-}
-
-func TestConfigEncryptKeysTool_Execute_UnicodePassphrase(t *testing.T) {
-	tool := newTestConfigEncryptKeysTool(t)
-
-	unicodePassphrase := "密码🔒🔑ปลายืดา"
-	result := tool.Execute(context.Background(), map[string]any{
-		"passphrase": unicodePassphrase,
-	})
-
-	if result == nil {
-		t.Fatal("Execute should return result for unicode passphrase")
-	}
-}
-
-func TestConfigEncryptKeysTool_Execute_WhitespacePassphrase(t *testing.T) {
-	tool := newTestConfigEncryptKeysTool(t)
-
-	result := tool.Execute(context.Background(), map[string]any{
-		"passphrase": "   ",
-	})
-
-	// Whitespace-only passphrase is still technically non-empty string, but may be rejected
-	if result == nil {
-		t.Fatal("Execute should return result")
-	}
-}
-
-func TestConfigEncryptKeysTool_Execute_NoRotate(t *testing.T) {
-	tool := newTestConfigEncryptKeysTool(t)
-
-	result := tool.Execute(context.Background(), map[string]any{
-		"passphrase": "secret",
-		// rotate not specified, should default to false
-	})
-
-	if result == nil {
-		t.Fatal("Execute should return result when rotate is not specified")
-	}
-}
-
-func TestConfigEncryptKeysTool_Execute_RotateDefault(t *testing.T) {
-	tool := newTestConfigEncryptKeysTool(t)
-
-	// When rotate is not provided, it should default to false
-	result := tool.Execute(context.Background(), map[string]any{
-		"passphrase": "new-secret",
-	})
-
-	if result == nil {
-		t.Fatal("Execute should return result")
+	for _, args := range []map[string]any{
+		{"passphrase": "new-secret"},
+		{"old_passphrase": "old-secret"},
+		{"passphrase": 12345},
+	} {
+		result := tool.Execute(context.Background(), args)
+		if result == nil {
+			t.Fatal("Execute should return result")
+		}
+		if !result.IsError {
+			t.Fatalf("secret args should fail closed: %#v", args)
+		}
+		if !strings.Contains(result.ForLLM, "passphrases are not accepted") {
+			t.Fatalf("error should reject passphrase args, got %q", result.ForLLM)
+		}
 	}
 }
