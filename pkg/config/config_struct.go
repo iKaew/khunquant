@@ -354,7 +354,7 @@ func (v *SecureModelList) UnmarshalYAML(value *yaml.Node) error {
 		if sec == nil {
 			sec = mm[m.ModelName]
 		}
-		if sec != nil {
+		if sec != nil && m.APIKey.String() == "" {
 			m.APIKey = sec.APIKey
 		}
 	}
@@ -416,8 +416,14 @@ func (c *BinanceExchangeConfig) UnmarshalYAML(value *yaml.Node) error {
 	}
 	for i := range c.Accounts {
 		key := accountKey(c.Accounts[i].Name, i)
-		if e := mm[key]; e != nil {
+		e := mm[key]
+		if e == nil {
+			continue
+		}
+		if c.Accounts[i].APIKey.String() == "" {
 			c.Accounts[i].APIKey = e.APIKey
+		}
+		if c.Accounts[i].Secret.String() == "" {
 			c.Accounts[i].Secret = e.Secret
 		}
 	}
@@ -439,8 +445,14 @@ func (c *BinanceTHExchangeConfig) UnmarshalYAML(value *yaml.Node) error {
 	}
 	for i := range c.Accounts {
 		key := accountKey(c.Accounts[i].Name, i)
-		if e := mm[key]; e != nil {
+		e := mm[key]
+		if e == nil {
+			continue
+		}
+		if c.Accounts[i].APIKey.String() == "" {
 			c.Accounts[i].APIKey = e.APIKey
+		}
+		if c.Accounts[i].Secret.String() == "" {
 			c.Accounts[i].Secret = e.Secret
 		}
 	}
@@ -462,8 +474,14 @@ func (c *BitkubExchangeConfig) UnmarshalYAML(value *yaml.Node) error {
 	}
 	for i := range c.Accounts {
 		key := accountKey(c.Accounts[i].Name, i)
-		if e := mm[key]; e != nil {
+		e := mm[key]
+		if e == nil {
+			continue
+		}
+		if c.Accounts[i].APIKey.String() == "" {
 			c.Accounts[i].APIKey = e.APIKey
+		}
+		if c.Accounts[i].Secret.String() == "" {
 			c.Accounts[i].Secret = e.Secret
 		}
 	}
@@ -485,9 +503,17 @@ func (c *OKXExchangeConfig) UnmarshalYAML(value *yaml.Node) error {
 	}
 	for i := range c.Accounts {
 		key := accountKey(c.Accounts[i].Name, i)
-		if e := mm[key]; e != nil {
+		e := mm[key]
+		if e == nil {
+			continue
+		}
+		if c.Accounts[i].APIKey.String() == "" {
 			c.Accounts[i].APIKey = e.APIKey
+		}
+		if c.Accounts[i].Secret.String() == "" {
 			c.Accounts[i].Secret = e.Secret
+		}
+		if c.Accounts[i].Passphrase.String() == "" {
 			c.Accounts[i].Passphrase = e.Passphrase
 		}
 	}
@@ -547,9 +573,17 @@ func (c *SettradeExchangeConfig) UnmarshalYAML(value *yaml.Node) error {
 	}
 	for i := range c.Accounts {
 		key := accountKey(c.Accounts[i].Name, i)
-		if e := mm[key]; e != nil {
+		e := mm[key]
+		if e == nil {
+			continue
+		}
+		if c.Accounts[i].APIKey.String() == "" {
 			c.Accounts[i].APIKey = e.APIKey
+		}
+		if c.Accounts[i].Secret.String() == "" {
 			c.Accounts[i].Secret = e.Secret
+		}
+		if c.Accounts[i].PIN.String() == "" {
 			c.Accounts[i].PIN = e.PIN
 		}
 	}
