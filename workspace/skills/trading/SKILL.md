@@ -123,6 +123,80 @@ Check current funding rate and optionally account funding-fee history.
 - `since`: optional history start (`30d`, `2026-01-01`, ISO 8601)
 - `limit`: max 100
 
+## Futures Lifecycle
+
+Always follow this sequence for futures operations:
+
+1. **Validate** (`futures_validate_market`) — confirm the symbol is an active linear swap before anything else.
+2. **Inspect risk and cost** (`futures_risk_summary`, `futures_estimate_funding_fee`) — understand current exposure and upcoming funding payments.
+3. **Enable leverage trading** — `trading_risk.allow_leverage=true` must be set in config; all live futures mutation tools reject without it.
+4. **Open with protection** (`futures_open_position`) — always supply `stop_loss` and/or `take_profit`. If protection placement fails, the tool returns an `UNPROTECTED POSITION` error; immediately call `futures_modify_protection` or `futures_close_position`.
+5. **Monitor** (`futures_get_positions`, `futures_risk_summary`) — watch margin health and liquidation distance.
+6. **Adjust** (`futures_modify_protection`, `futures_reduce_position`) — move stops or trim size as the trade develops.
+7. **Close** (`futures_close_position`) — reduce-only market or limit close.
+8. **Emergency exit** (`futures_emergency_flatten`) — cancels all futures orders then closes every open position; requires `confirm=true`.
+
+### futures_validate_market
+Load market metadata and confirm a symbol is a tradeable active linear swap.
+Returns contract size, min amount, min cost, leverage min/max, and settlement currency.
+Read-only — no `allow_leverage` required.
+- `provider`, `account` (optional), `symbol`
+
+### futures_risk_summary
+Summarize all open futures positions with margin health, liquidation distance, and PnL.
+Returns per-position: side, size, entry, mark, liquidation distance %, margin mode, leverage, unrealized PnL, margin ratio %, and a risk label (`safe` / `warn` / `critical`).
+Read-only.
+- `provider`, `account` (optional)
+- `symbol`: optional filter
+
+### futures_estimate_funding_fee
+Estimate the next funding payment for a symbol or all open positions.
+Returns next funding timestamp and estimated fee (positive = you pay, negative = you receive).
+Read-only.
+- `provider`, `account` (optional)
+- `symbol`: optional — if omitted and account is set, estimates for every open position
+
+### futures_close_position
+Close a specific futures position with reduce-only order semantics. Requires `confirm=true`.
+- `provider`, `account`, `symbol`
+- `order_type`: `market` (default) or `limit`
+- `limit_price`: required when `order_type=limit`
+- `position_side`: optional hedge-mode side (`long` or `short`)
+- `confirm`: must be true
+
+### futures_reduce_position
+Reduce an open position by an absolute amount or a percentage. Requires `confirm=true`.
+Exactly one of `amount` or `percent` must be provided.
+- `provider`, `account`, `symbol`
+- `amount`: base units to reduce
+- `percent`: 1–100 percent of current position size to reduce
+- `order_type`, `limit_price`, `position_side`, `confirm`
+
+### futures_modify_protection
+Create, replace, or move stop-loss and take-profit orders for an open position.
+If `replace=true`, cancels any existing reduce-only protection orders first.
+An `UNPROTECTED POSITION` warning is returned if cancel succeeds but placement fails.
+Requires `confirm=true`.
+- `provider`, `account`, `symbol`
+- `stop_loss`: new stop-loss trigger price (optional)
+- `take_profit`: new take-profit trigger price (optional)
+- `replace`: true to cancel existing protection before placing new orders (default false)
+- `confirm`: must be true
+
+### futures_cancel_orders
+Cancel futures orders by ID, by symbol (all), or by type. Requires `confirm=true`.
+- `provider`, `account`
+- `symbol`: required
+- `order_id`: cancel a specific order by ID
+- `type`: `all` | `entry` | `stop_loss` | `take_profit` | `protection` (cancels SL+TP)
+- `confirm`: must be true
+
+### futures_emergency_flatten
+Cancel all futures orders then close every open position with reduce-only market orders.
+Always returns a final risk summary to confirm zero exposure. Requires `confirm=true`.
+- `provider`, `account` (optional — flattens all configured futures accounts if omitted)
+- `confirm`: must be true
+
 ## Notes
 - **Bitkub**: `get_open_orders` and `get_order_history` require a `symbol` parameter (e.g. `BTC/THB`). Calling without a symbol will fail — always ask the user which trading pair to check, or iterate over known pairs.
 - **Binance TH and Bitkub**: no futures trading support. Use futures tools only with `binance` and `okx`.
