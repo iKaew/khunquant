@@ -2910,14 +2910,14 @@ func TestPublishResponseIfNeeded_EmptyResponse(t *testing.T) {
 	al, _, _, _, cleanup := newTestAgentLoop(t)
 	defer cleanup()
 	// empty response should return early without panic
-	al.PublishResponseIfNeeded(context.Background(), "telegram", "123", "")
+	al.PublishResponseIfNeeded(context.Background(), "telegram", "123", "", "")
 }
 
 func TestPublishResponseIfNeeded_WithResponse(t *testing.T) {
 	al, _, msgBus, _, cleanup := newTestAgentLoop(t)
 	defer cleanup()
 	al.bus = msgBus
-	al.PublishResponseIfNeeded(context.Background(), "telegram", "123", "hello world")
+	al.PublishResponseIfNeeded(context.Background(), "telegram", "123", "", "hello world")
 }
 
 func TestBuildContinuationTarget_SystemChannel(t *testing.T) {

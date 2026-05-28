@@ -464,7 +464,7 @@ func (al *AgentLoop) Stop() {
 	al.running.Store(false)
 }
 
-func (al *AgentLoop) PublishResponseIfNeeded(ctx context.Context, channel, chatID, response string) {
+func (al *AgentLoop) PublishResponseIfNeeded(ctx context.Context, channel, chatID, sessionKey, response string) {
 	if response == "" {
 		return
 	}
