@@ -78,7 +78,7 @@ Both governed by the delta-neutral invariant (matched notional). Plan: `~/.claud
 
 | Task | Description | Files | Status | Reviewer notes | Commit |
 |------|-------------|-------|--------|----------------|--------|
-| F1 | Correct sizing at create (equal notional N=(cap−reserve)·L/(L+1)) + leverage≤MaxLeverage validation | `pkg/tools/delta_neutral_create_plan.go`, `delta_neutral_tools_test.go` | 🟡 | dispatched to Sonnet | |
+| F1 | Correct sizing at create (equal notional N=(cap−reserve)·L/(L+1)) + leverage≤MaxLeverage validation | `pkg/tools/delta_neutral_create_plan.go`, `delta_neutral_tools_test.go` | ✅ | **Independently verified:** build exit 0; 20 DeltaNeutral tests pass; gofmt clean. Sizing block sets equal Spot/FuturesNotionalUSDT (5000 @ cap10k/L1; 6750 @ cap10k/L3/res1k), persists ReserveMarginUSDT, validates leverage≤MaxLeverage + reserve<capital. (Note: rounding truncates via int*100 — acceptable.) | _next_ |
 | F2 | Apply leverage on open (SetFuturesLeverage) + real spot qty from live price | `pkg/tools/delta_neutral_open.go` | ⬜ | | |
 | F3 | Edit leverage via update tool (draft: stored; active: live-apply + liq re-validate) | `pkg/tools/delta_neutral_update_plan.go` | ⬜ | | |
 | F4 | New `resize_delta_neutral_position` tool (±equal notional both legs; partial-fail→recovery) + full wiring | `pkg/tools/delta_neutral_resize.go` (+ names/config/defaults/tools.go/helpers.go) | ⬜ | | |

@@ -223,31 +223,56 @@ func (t *CreateDeltaNeutralPlanTool) Execute(ctx context.Context, args map[strin
 	// Determine if cross-exchange
 	crossExchange := strings.ToLower(spotProvider) != strings.ToLower(futuresProvider)
 
+	// Validate leverage against max_leverage
+	if riskPolicy.MaxLeverage > 0 && leverage > riskPolicy.MaxLeverage {
+		return ErrorResult(fmt.Sprintf("leverage %d exceeds max_leverage %d", leverage, riskPolicy.MaxLeverage))
+	}
+
+	// Validate reserve margin
+	reserve := riskPolicy.ReserveMarginUSDT
+	if reserve >= capitalUSDT {
+		return ErrorResult("reserve margin must be less than capital")
+	}
+
+	// Compute equal notional for spot and futures legs
+	// Formula: N = (capital - reserve) * leverage / (leverage + 1)
+	// This ensures spot notional + futures margin ≈ deployable capital
+	L := float64(leverage)
+	spotNotional := (capitalUSDT - reserve) * L / (L + 1)
+	futuresNotional := spotNotional
+
+	// Round to 2 decimal places for sensible precision
+	spotNotional = float64(int(spotNotional*100)) / 100
+	futuresNotional = float64(int(futuresNotional*100)) / 100
+
 	now := time.Now().UTC()
 	plan := &deltaneutral.Plan{
-		Name:              planName,
-		Asset:             asset,
-		Status:            deltaneutral.PlanStatusDraft,
-		Mode:              deltaneutral.ExecutionModeApproval,
-		SpotProvider:      spotProvider,
-		SpotAccount:       spotAccount,
-		SpotSymbol:        spotSymbol,
-		SpotSide:          "buy",
-		FuturesProvider:   futuresProvider,
-		FuturesAccount:    futuresAccount,
-		FuturesSymbol:     futuresSymbol,
-		FuturesSide:       "short",
-		FuturesMarginMode: "cross",
-		FuturesLeverage:   leverage,
-		CapitalUSDT:       capitalUSDT,
-		MonitorInterval:   monitorInterval,
-		Enabled:           true,
-		RiskPolicy:        riskPolicy,
-		CrossExchange:     crossExchange,
-		NotifyChannel:     notifyChannel,
-		NotifyChatID:      notifyChatID,
-		CreatedAt:         now,
-		UpdatedAt:         now,
+		Name:                planName,
+		Asset:               asset,
+		Status:              deltaneutral.PlanStatusDraft,
+		Mode:                deltaneutral.ExecutionModeApproval,
+		SpotProvider:        spotProvider,
+		SpotAccount:         spotAccount,
+		SpotSymbol:          spotSymbol,
+		SpotSide:            "buy",
+		FuturesProvider:     futuresProvider,
+		FuturesAccount:      futuresAccount,
+		FuturesSymbol:       futuresSymbol,
+		FuturesSide:         "short",
+		FuturesMarginMode:   "cross",
+		FuturesLeverage:     leverage,
+		CapitalUSDT:         capitalUSDT,
+		SpotNotionalUSDT:    spotNotional,
+		FuturesNotionalUSDT: futuresNotional,
+		ReserveMarginUSDT:   reserve,
+		MonitorInterval:     monitorInterval,
+		Enabled:             true,
+		RiskPolicy:          riskPolicy,
+		CrossExchange:       crossExchange,
+		NotifyChannel:       notifyChannel,
+		NotifyChatID:        notifyChatID,
+		CreatedAt:           now,
+		UpdatedAt:           now,
 	}
 
 	planID, err := t.store.SavePlan(ctx, plan)
@@ -296,6 +321,9 @@ func (t *CreateDeltaNeutralPlanTool) Execute(ctx context.Context, args map[strin
 	out += fmt.Sprintf("  Spot leg:        %s on %s (%s)\n", spotSymbol, spotProvider, spotAccount)
 	out += fmt.Sprintf("  Futures leg:     %s on %s (leverage %d, %s)\n", futuresSymbol, futuresProvider, leverage, futuresAccount)
 	out += fmt.Sprintf("  Capital:         %.2f USDT\n", capitalUSDT)
+	out += fmt.Sprintf("  Spot notional:   %.2f USDT\n", spotNotional)
+	out += fmt.Sprintf("  Futures notional:%.2f USDT\n", futuresNotional)
+	out += fmt.Sprintf("  Reserve margin:  %.2f USDT\n", reserve)
 	out += fmt.Sprintf("  Monitor interval:%s\n", monitorInterval)
 	out += fmt.Sprintf("  Status:          draft (ready for activation)\n")
 	out += fmt.Sprintf("  Cron job ID:     %s\n", job.ID)

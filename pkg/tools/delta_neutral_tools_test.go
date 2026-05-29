@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -369,5 +370,190 @@ func TestGetDeltaNeutralHistoryTool(t *testing.T) {
 	}
 	if result.ForUser == "" {
 		t.Errorf("Expected output for user, got empty string")
+	}
+}
+
+func TestCreateDeltaNeutralPlanTool_EqualNotionalSizing(t *testing.T) {
+	store, _ := deltaneutral.NewStore(t.TempDir())
+	cronService := newTestCronServiceForDN(t)
+
+	tool := NewCreateDeltaNeutralPlanTool(&config.Config{}, store, cronService)
+
+	// Test case 1: capital 10000, leverage 1, no reserve
+	// N = (10000 - 0) * 1 / (1 + 1) = 5000
+	args := map[string]any{
+		"plan_name":        "Equal Notional Test 1",
+		"asset":            "BTC",
+		"spot_provider":    "binance",
+		"spot_account":     "my_spot",
+		"spot_symbol":      "BTC/USDT",
+		"futures_provider": "binance",
+		"futures_account":  "my_futures",
+		"futures_symbol":   "BTC/USDT:USDT",
+		"capital_usdt":     10000.0,
+		"leverage":         1.0,
+		"monitor_interval": "5m",
+	}
+
+	result := tool.Execute(context.Background(), args)
+	if result.IsError {
+		t.Fatalf("Expected success, got error: %s", result.ForLLM)
+	}
+
+	plans, _ := store.ListPlans(context.Background(), deltaneutral.QueryFilter{Limit: 10})
+	if len(plans) == 0 {
+		t.Fatalf("Expected plan to be saved")
+	}
+	plan := plans[len(plans)-1]
+	expectedNotional := 5000.0
+	if plan.SpotNotionalUSDT != expectedNotional || plan.FuturesNotionalUSDT != expectedNotional {
+		t.Errorf("Expected both notionals to be %.2f, got spot=%.2f, futures=%.2f",
+			expectedNotional, plan.SpotNotionalUSDT, plan.FuturesNotionalUSDT)
+	}
+	if plan.ReserveMarginUSDT != 0 {
+		t.Errorf("Expected reserve margin 0, got %.2f", plan.ReserveMarginUSDT)
+	}
+}
+
+func TestCreateDeltaNeutralPlanTool_SizingWithReserve(t *testing.T) {
+	store, _ := deltaneutral.NewStore(t.TempDir())
+	cronService := newTestCronServiceForDN(t)
+
+	tool := NewCreateDeltaNeutralPlanTool(&config.Config{}, store, cronService)
+
+	// Test case 2: capital 10000, leverage 3, reserve 1000
+	// N = (10000 - 1000) * 3 / (3 + 1) = 9000 * 3 / 4 = 6750
+	args := map[string]any{
+		"plan_name":        "Equal Notional Test 2",
+		"asset":            "ETH",
+		"spot_provider":    "binance",
+		"spot_symbol":      "ETH/USDT",
+		"futures_provider": "okx",
+		"futures_symbol":   "ETH/USDT:USDT",
+		"capital_usdt":     10000.0,
+		"leverage":         3.0,
+		"monitor_interval": "5m",
+		"risk_policy": map[string]any{
+			"reserve_margin_usdt": 1000.0,
+		},
+	}
+
+	result := tool.Execute(context.Background(), args)
+	if result.IsError {
+		t.Fatalf("Expected success, got error: %s", result.ForLLM)
+	}
+
+	plans, _ := store.ListPlans(context.Background(), deltaneutral.QueryFilter{Limit: 10})
+	if len(plans) == 0 {
+		t.Fatalf("Expected plan to be saved")
+	}
+	plan := plans[len(plans)-1]
+	expectedNotional := 6750.0
+	if plan.SpotNotionalUSDT != expectedNotional || plan.FuturesNotionalUSDT != expectedNotional {
+		t.Errorf("Expected both notionals to be %.2f, got spot=%.2f, futures=%.2f",
+			expectedNotional, plan.SpotNotionalUSDT, plan.FuturesNotionalUSDT)
+	}
+	if plan.ReserveMarginUSDT != 1000.0 {
+		t.Errorf("Expected reserve margin 1000.0, got %.2f", plan.ReserveMarginUSDT)
+	}
+}
+
+func TestCreateDeltaNeutralPlanTool_RejectLeverageExceedsMax(t *testing.T) {
+	store, _ := deltaneutral.NewStore(t.TempDir())
+	cronService := newTestCronServiceForDN(t)
+
+	tool := NewCreateDeltaNeutralPlanTool(&config.Config{}, store, cronService)
+
+	// Try leverage 10 with max_leverage 5 (should reject)
+	args := map[string]any{
+		"plan_name":        "Leverage Test",
+		"asset":            "BTC",
+		"spot_provider":    "binance",
+		"spot_symbol":      "BTC/USDT",
+		"futures_provider": "binance",
+		"futures_symbol":   "BTC/USDT:USDT",
+		"capital_usdt":     10000.0,
+		"leverage":         10.0,
+		"monitor_interval": "5m",
+		"risk_policy": map[string]any{
+			"max_leverage": 5.0,
+		},
+	}
+
+	result := tool.Execute(context.Background(), args)
+	if !result.IsError {
+		t.Errorf("Expected error for leverage 10 with max_leverage 5, got success")
+	}
+	if result.ForLLM == "" {
+		t.Errorf("Expected error message, got empty string")
+	}
+}
+
+func TestCreateDeltaNeutralPlanTool_RejectReserveNotLessThanCapital(t *testing.T) {
+	store, _ := deltaneutral.NewStore(t.TempDir())
+	cronService := newTestCronServiceForDN(t)
+
+	tool := NewCreateDeltaNeutralPlanTool(&config.Config{}, store, cronService)
+
+	// Try reserve >= capital (should reject)
+	args := map[string]any{
+		"plan_name":        "Reserve Test",
+		"asset":            "BTC",
+		"spot_provider":    "binance",
+		"spot_symbol":      "BTC/USDT",
+		"futures_provider": "binance",
+		"futures_symbol":   "BTC/USDT:USDT",
+		"capital_usdt":     10000.0,
+		"leverage":         1.0,
+		"monitor_interval": "5m",
+		"risk_policy": map[string]any{
+			"reserve_margin_usdt": 10000.0, // equal to capital, should reject
+		},
+	}
+
+	result := tool.Execute(context.Background(), args)
+	if !result.IsError {
+		t.Errorf("Expected error for reserve >= capital, got success")
+	}
+	if result.ForLLM == "" {
+		t.Errorf("Expected error message, got empty string")
+	}
+}
+
+func TestCreateDeltaNeutralPlanTool_SummaryIncludesNotionalAndReserve(t *testing.T) {
+	store, _ := deltaneutral.NewStore(t.TempDir())
+	cronService := newTestCronServiceForDN(t)
+
+	tool := NewCreateDeltaNeutralPlanTool(&config.Config{}, store, cronService)
+
+	args := map[string]any{
+		"plan_name":        "Summary Test",
+		"asset":            "BTC",
+		"spot_provider":    "binance",
+		"spot_account":     "spot1",
+		"spot_symbol":      "BTC/USDT",
+		"futures_provider": "binance",
+		"futures_account":  "fut1",
+		"futures_symbol":   "BTC/USDT:USDT",
+		"capital_usdt":     10000.0,
+		"leverage":         2.0,
+		"monitor_interval": "5m",
+		"risk_policy": map[string]any{
+			"reserve_margin_usdt": 500.0,
+		},
+	}
+
+	result := tool.Execute(context.Background(), args)
+	if result.IsError {
+		t.Fatalf("Expected success, got error: %s", result.ForLLM)
+	}
+
+	// Verify the summary output includes notional and reserve
+	output := result.ForUser
+	if !strings.Contains(output, "notional") {
+		t.Errorf("Expected 'notional' in summary output")
+	}
+	if !strings.Contains(output, "Reserve margin") {
+		t.Errorf("Expected 'Reserve margin' in summary output")
 	}
 }
