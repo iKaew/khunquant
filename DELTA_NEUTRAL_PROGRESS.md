@@ -54,7 +54,7 @@ The PRD was slightly off; the real codebase uses the **full DCA tool-wiring patt
 | T2.2 | SQLite store: 5 tables + indexes + CRUD | `pkg/deltaneutral/store.go`, `store_test.go` | ✅ | Independently verified: 5 tables per §9.4, all PRAGMAs (WAL/NORMAL/FK/cache), 4 CASCADE + 1 SET NULL, db path `{ws}/memory/delta_neutral/delta_neutral.db`; cascade + filter tests pass; 15 tests pass; build/vet/fmt clean. | `fc6f5ad0` |
 | T2.3 | Deterministic health evaluator `Evaluate()` | `pkg/deltaneutral/health.go`, `health_test.go` | ✅ | Independently verified: §11 formulas exact (delta-drift abs/max; liq-distance mark==0 & liq==0 guards); 9 breach codes; data-failure-first honoring EscalateOnDataFailure; cross-exchange penalty w/o auto-breach; 6-component score; pure fn; 27 pkg tests pass; build/vet/fmt clean. | `4d0e4d62` |
 | T2.4 | 7 plan/summary/history tools + full wiring | `pkg/tools/delta_neutral_*.go`, `names.go`, `config.go`, `defaults.go`, `web/backend/api/tools.go` | ⬜ | | |
-| T2.5 | Execution state-machine model (pure) | `pkg/deltaneutral/execution.go`, `execution_test.go` | ✅ | Independently verified: 14 ExecutionState + 9 LegState + 2 LegType per §7.9; CanTransition/AllowedTransitions/IsTerminal; FirstLegType returns spot when spotLessLiquid (TestFirstLegType passes — confirmed directly after a stale-grep false alarm); no clash with store.go Execution/ExecutionLeg row structs; 33 pkg tests pass; build/vet/fmt clean. Done out of order (pure/independent) before T2.4. | _next_ |
+| T2.5 | Execution state-machine model (pure) | `pkg/deltaneutral/execution.go`, `execution_test.go` | ✅ | Independently verified: 14 ExecutionState + 9 LegState + 2 LegType per §7.9; CanTransition/AllowedTransitions/IsTerminal; FirstLegType returns spot when spotLessLiquid (TestFirstLegType passes — confirmed directly after a stale-grep false alarm); no clash with store.go Execution/ExecutionLeg row structs; 33 pkg tests pass; build/vet/fmt clean. Done out of order (pure/independent) before T2.4. | `c33f30b3` |
 | T2.6 | Cron monitor handler + gateway wiring | `cmd/khunquant/internal/gateway/delta_neutral_handler.go`, `helpers.go` | ⬜ | | |
 
 ## Phase 3 — REST + Web UI — ⬜ NOT STARTED
@@ -81,7 +81,18 @@ The PRD was slightly off; the real codebase uses the **full DCA tool-wiring patt
 - **T1.2 ✅** funding-rate skill extended (on disk); commit attempted — SHA to be confirmed.
 - **⚠️ Tooling incident:** mid-session, a context replay surfaced fabricated "T2.1–T2.3 complete" results; shell output also went intermittently blank. Reconciled against real `git log` + filesystem: Phase 2 is **not** started. **Resume Phase 2 from T2.1 in a fresh session** with working shell tooling.
 
+## ✅ Checkpoint — 2026-05-29 (end of session 1)
+
+**Done & verified green (6 of 13 tasks):** T1.1, T1.2 (skills); T2.1, T2.2, T2.3, T2.5 (the complete pure `pkg/deltaneutral` Go core — types, SQLite store, health evaluator, execution state machine).
+
+**Verification at checkpoint:** `go build ./pkg/deltaneutral/` ✅ · `go vet` ✅ · `go test ./pkg/deltaneutral/` → **33 tests pass** ✅ · `gofmt -l` clean ✅. All committed on `feat/delta-neutral`; `main` untouched.
+
+> ⚠️ **Recorded short-SHAs above may be inaccurate.** Commit *content/messages* are correct and present, but the SHA values were captured through an unreliable shell proxy (e.g. T2.3's real SHA is `2ba36c9b`, not the recorded `4d0e4d62`). **Authoritative source = `git log feat/delta-neutral`**, not this table. Verify SHAs there if needed.
+
+**Remaining (7 tasks, NOT started):** T2.4 (tools + shared-file wiring), T2.6 (gateway monitor), T3.1–T3.3 (REST + Web UI), T4.1–T4.2 (execution tools + integration). These touch shared files (`names.go`, `config.go`, `defaults.go`, `tools.go`, `helpers.go`, `router.go`) — do them strictly sequentially with a clean shell.
+
 ## Resume instructions (next session)
-1. `git log --oneline` — confirm T1.1 (`feff8181`) and the T1.2 commit are present; if T1.2 is uncommitted, commit `workspace/skills/funding-rate-analysis/SKILL.md`.
-2. Begin **T2.1** (create `pkg/deltaneutral/{types.go,interval.go,interval_test.go}`) per the task row + the corrected-wiring section above.
-3. Continue strictly sequentially T2.2 → T4.2, reviewer independently running `go build`/`go test` before each ✅ (do not trust sub-agent self-reports).
+1. `git log feat/delta-neutral --oneline` — confirm the 6 task commits are present; rebuild `go build ./... && go test ./pkg/deltaneutral/`.
+2. Start **T2.4** (the 7 plan/summary/history tools + full DCA-pattern wiring across names.go/config.go/defaults.go/tools.go — see the "Corrected wiring" section above; replicate ALL 5 wiring points). After each shared-file edit, run `make build` before proceeding.
+3. Then **T2.6** (gateway monitor handler + `dn:` dispatch + tool registration), then Phase 3, then Phase 4.
+4. Reviewer independently runs `go build`/`go test` and reads the diff before each ✅ — **do not trust sub-agent self-reports** (this session caught a wrong file path in T1.1 and saw fabricated/stale shell output; always confirm against disk + git).
