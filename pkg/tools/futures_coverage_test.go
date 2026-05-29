@@ -14,12 +14,13 @@ import (
 
 // mockFuturesProvider is a minimal broker.FuturesProvider for unit tests.
 type mockFuturesProvider struct {
-	markPriceFn              func(ctx context.Context, symbol string) (float64, error)
-	fundingRateFn            func(ctx context.Context, symbol string) (ccxt.FundingRate, error)
-	loadMarketsFn            func(ctx context.Context) (map[string]ccxt.MarketInterface, error)
-	fetchFuturesOrderFn      func(ctx context.Context, id, symbol string) (ccxt.Order, error)
-	fetchFuturesPositionsFn  func(ctx context.Context, symbols []string) ([]ccxt.Position, error)
-	fetchFundingHistoryFn    func(ctx context.Context, symbol string, since *int64, limit int) ([]ccxt.FundingHistory, error)
+	markPriceFn                       func(ctx context.Context, symbol string) (float64, error)
+	fundingRateFn                     func(ctx context.Context, symbol string) (ccxt.FundingRate, error)
+	loadMarketsFn                     func(ctx context.Context) (map[string]ccxt.MarketInterface, error)
+	fetchFuturesOrderFn               func(ctx context.Context, id, symbol string) (ccxt.Order, error)
+	fetchFuturesPositionsFn           func(ctx context.Context, symbols []string) ([]ccxt.Position, error)
+	fetchFundingHistoryFn             func(ctx context.Context, symbol string, since *int64, limit int) ([]ccxt.FundingHistory, error)
+	fetchPublicFundingRateHistoryFn   func(ctx context.Context, symbol string, since *int64, limit int) ([]ccxt.FundingRateHistory, error)
 }
 
 func (m *mockFuturesProvider) ID() string                          { return "mock" }
@@ -71,6 +72,12 @@ func (m *mockFuturesProvider) FetchFuturesPositions(ctx context.Context, symbols
 func (m *mockFuturesProvider) FetchFuturesFundingHistory(ctx context.Context, symbol string, since *int64, limit int) ([]ccxt.FundingHistory, error) {
 	if m.fetchFundingHistoryFn != nil {
 		return m.fetchFundingHistoryFn(ctx, symbol, since, limit)
+	}
+	return nil, nil
+}
+func (m *mockFuturesProvider) FetchPublicFundingRateHistory(ctx context.Context, symbol string, since *int64, limit int) ([]ccxt.FundingRateHistory, error) {
+	if m.fetchPublicFundingRateHistoryFn != nil {
+		return m.fetchPublicFundingRateHistoryFn(ctx, symbol, since, limit)
 	}
 	return nil, nil
 }

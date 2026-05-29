@@ -17,7 +17,7 @@ import (
 	"github.com/cryptoquantumwave/khunquant/pkg/providers/broker"
 )
 
-// catchPanic converts a CCXT panic (which the library uses instead of returning errors) into a Go error.
+// catchPanic converts a CCXT panic into a Go error.
 func catchPanic(fn func() error) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -336,6 +336,21 @@ func (a *BinanceBrokerAdapter) FetchFuturesFundingHistory(_ context.Context, sym
 		opts = append(opts, ccxt.WithFetchFundingHistoryLimit(int64(limit)))
 	}
 	err = catchPanic(func() error { history, err = a.usdm.FetchFundingHistory(opts...); return err })
+	return
+}
+
+func (a *BinanceBrokerAdapter) FetchPublicFundingRateHistory(_ context.Context, symbol string, since *int64, limit int) (history []ccxt.FundingRateHistory, err error) {
+	opts := []ccxt.FetchFundingRateHistoryOptions{}
+	if symbol != "" {
+		opts = append(opts, ccxt.WithFetchFundingRateHistorySymbol(symbol))
+	}
+	if since != nil {
+		opts = append(opts, ccxt.WithFetchFundingRateHistorySince(*since))
+	}
+	if limit > 0 {
+		opts = append(opts, ccxt.WithFetchFundingRateHistoryLimit(int64(limit)))
+	}
+	err = catchPanic(func() error { history, err = a.usdm.FetchFundingRateHistory(opts...); return err })
 	return
 }
 

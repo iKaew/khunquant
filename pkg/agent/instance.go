@@ -249,6 +249,9 @@ func NewAgentInstance(
 	if cfg.Tools.IsToolEnabled("futures_emergency_flatten") {
 		toolsRegistry.Register(tools.NewFuturesEmergencyFlattenTool(cfg))
 	}
+	if cfg.Tools.IsToolEnabled("funding_rate_history") {
+		toolsRegistry.Register(tools.NewFundingRateHistoryTool(cfg))
+	}
 
 	// Technical analysis tools (Track C).
 	if cfg.Tools.IsToolEnabled("calculate_indicators") {

@@ -60,6 +60,7 @@ const (
 	NameFuturesModifyProtection = "futures_modify_protection"
 	NameFuturesCancelOrders     = "futures_cancel_orders"
 	NameFuturesEmergencyFlatten = "futures_emergency_flatten"
+	NameFundingRateHistory      = "funding_rate_history"
 
 	// Technical analysis (Track C)
 	NameCalculateIndicators = "calculate_indicators"
@@ -151,6 +152,7 @@ const (
 	DescFuturesModifyProtection   = "Create, replace, or move stop-loss and take-profit protection orders on an open futures position."
 	DescFuturesCancelOrders       = "Cancel Binance or OKX futures orders by order ID, symbol, or order type (all or protection)."
 	DescFuturesEmergencyFlatten   = "Cancel all futures orders and close all open positions on a Binance or OKX account. Requires confirm=true."
+	DescFundingRateHistory        = "Fetch public funding rate history for a perpetual futures symbol and compute rolling statistics (mean, max, min, volatility) over 3d/7d/14d windows. Uses public API — no credentials required."
 
 	// DCA tool descriptions
 	DescCreateDCAPlan   = "Create a new Dollar Cost Averaging plan to automatically invest a fixed amount on a schedule."
