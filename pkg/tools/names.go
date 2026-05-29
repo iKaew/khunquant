@@ -99,6 +99,7 @@ const (
 	NameOpenDeltaNeutralPosition = "open_delta_neutral_position"
 	NameUnwindDeltaNeutralPosition = "unwind_delta_neutral_position"
 	NameResizeDeltaNeutralPosition = "resize_delta_neutral_position"
+	NameScanDeltaNeutralOpportunities = "scan_delta_neutral_opportunities"
 )
 
 // Category constants for the web UI tool catalog.
@@ -187,4 +188,5 @@ const (
 	DescOpenDeltaNeutralPosition = "Open a delta-neutral position (approval-mode two-leg execution: futures hedge + spot buy). HIGHEST-RISK: requires leverage opt-in, permission, daily-loss, rate-limit gates. Dry-run (confirm=false) shows review; confirm=true executes."
 	DescUnwindDeltaNeutralPosition = "Close a delta-neutral position (unwind both legs: reduce-only futures close + spot sell). Recovery tool for unhedged exposure or manual closure. Approval-mode: confirm=true required."
 	DescResizeDeltaNeutralPosition = "Adjust an active delta-neutral position by resizing both legs equally (approval-mode). Maintains delta-neutrality (equal notional on both legs). Partial fill → recovery_required. Dry-run (confirm=false) shows review; confirm=true executes."
+	DescScanDeltaNeutralOpportunities = "Scan the top N crypto assets by market cap for delta-neutral funding-carry opportunities: batch-fetch funding rates, rank by annualized APR, optionally compute stability stats. Returns a sorted table with funding metrics and direction labels. Funding-only screen — validate with risk tools before trading."
 )
