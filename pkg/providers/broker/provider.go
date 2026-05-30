@@ -159,6 +159,14 @@ type FuturesProvider interface {
 	CancelAllFuturesOrders(ctx context.Context, symbol string) ([]ccxt.Order, error)
 }
 
+// EarnRatePoint represents a single historical earn rate data point.
+// Rate is an annualized fraction (0.05 == 5% APY).
+// Timestamp is in milliseconds.
+type EarnRatePoint struct {
+	Rate      float64
+	Timestamp int64
+}
+
 // EarnProduct describes a flexible savings/earn product offered for an asset.
 // APY is a fraction (0.05 == 5%).
 type EarnProduct struct {
@@ -199,6 +207,9 @@ type EarnProvider interface {
 	RedeemFlexibleEarn(ctx context.Context, productID, asset string, amount float64, redeemAll bool) (string, error)
 	// SetFlexibleAutoSubscribe enables/disables auto-subscribe for the product/asset.
 	SetFlexibleAutoSubscribe(ctx context.Context, productID, asset string, enable bool) error
+	// FetchFlexibleEarnRateHistory returns historical rate data points.
+	// productID is required; since is optional. limit capped at 100 by callers.
+	FetchFlexibleEarnRateHistory(ctx context.Context, productID, asset string, since *int64, limit int) ([]EarnRatePoint, error)
 }
 
 // Balance mirrors pkg/exchanges.Balance so callers don't need to import both.

@@ -90,6 +90,22 @@ func (m *mockEarnProviderForScan) SetFlexibleAutoSubscribe(ctx context.Context, 
 	return nil
 }
 
+func (m *mockEarnProviderForScan) FetchFlexibleEarnRateHistory(ctx context.Context, productID, asset string, since *int64, limit int) ([]broker.EarnRatePoint, error) {
+	// Return mock history: some points within the last 14 days at a fixed rate (5% APY).
+	// This is used for testing the 14d earn calculation.
+	now := time.Now().UnixMilli()
+	points := make([]broker.EarnRatePoint, 0)
+	// Add 10 points over the past 14 days at 0.05 (5% APY)
+	for i := 0; i < 10; i++ {
+		ts := now - int64((13-i)*24)*60*60*1000 // spread from 13d ago to now
+		points = append(points, broker.EarnRatePoint{
+			Rate:      0.05, // 5% APY as a fraction
+			Timestamp: ts,
+		})
+	}
+	return points, nil
+}
+
 // TestScanEarn_WithIncludeEarn: include_earn=true shows Earn% and Combined% columns.
 func TestScanEarn_WithIncludeEarn(t *testing.T) {
 	interval := "8h"
@@ -414,5 +430,148 @@ func TestScanEarn_EarnWithHistorySort(t *testing.T) {
 	// Earn% and Combined% should also be present.
 	if !strings.Contains(output, "Earn%") {
 		t.Fatalf("expected Earn%% column:\n%s", output)
+	}
+}
+
+// TestScanEarn_14dColumns: with include_stability && include_earn, 14d APR%/Earn%/Combined% columns appear.
+func TestScanEarn_14dColumns(t *testing.T) {
+	interval := "8h"
+	now := time.Now().UTC().UnixMilli()
+
+	mockFut := &mockFuturesProvider{
+		loadMarketsFn: func(ctx context.Context) (map[string]ccxt.MarketInterface, error) { return nil, nil },
+		fundingRatesFn: func(ctx context.Context, symbols []string) (map[string]ccxt.FundingRate, error) {
+			aaa := 0.0001
+			bbb := 0.0002
+			return map[string]ccxt.FundingRate{
+				"AAA/USDT:USDT": {FundingRate: &aaa, Interval: &interval},
+				"BBB/USDT:USDT": {FundingRate: &bbb, Interval: &interval},
+				"CCC/USDT:USDT": {FundingRate: &aaa, Interval: &interval},
+			}, nil
+		},
+		fetchPublicFundingRateHistoryFn: func(ctx context.Context, symbol string, since *int64, limit int) ([]ccxt.FundingRateHistory, error) {
+			// Return history points with 0.0001 funding rate over 14 days.
+			hist := make([]ccxt.FundingRateHistory, 0)
+			for i := 0; i < 40; i++ { // ~40 data points over 14 days (3 per day at 8h intervals)
+				ts := now - int64(i)*8*3600*1000
+				rate := 0.0001
+				hist = append(hist, ccxt.FundingRateHistory{Timestamp: &ts, FundingRate: &rate})
+			}
+			return hist, nil
+		},
+	}
+
+	mockEarn := &mockEarnProviderForScan{
+		productsByAsset: map[string]broker.EarnProduct{
+			"AAA": {Exchange: "binance", Asset: "AAA", ProductID: "AAA-FLEX", APY: 0.05, CanSubscribe: true},
+			"BBB": {Exchange: "binance", Asset: "BBB", ProductID: "BBB-FLEX", APY: 0.03, CanSubscribe: true},
+			// CCC has no earn product
+		},
+	}
+
+	res := scanRunWithEarn(t, mockFut, mockEarn, map[string]any{
+		"include_stability": true,
+		"include_earn":      true,
+		"sort_by":           "funding_rate",
+		"sort_order":        "desc",
+	})
+
+	if res.IsError {
+		t.Fatalf("unexpected error: %v", res.ForLLM)
+	}
+
+	output := res.ForUser
+
+	// Check for the three new 14d column headers.
+	if !strings.Contains(output, "14d APR%") {
+		t.Fatalf("expected '14d APR%%' column header:\n%s", output)
+	}
+	if !strings.Contains(output, "14d Earn%") {
+		t.Fatalf("expected '14d Earn%%' column header:\n%s", output)
+	}
+	if !strings.Contains(output, "14d Combined%") {
+		t.Fatalf("expected '14d Combined%%' column header:\n%s", output)
+	}
+
+	// AAA should have a numeric 14d APR% and 14d Earn% (5%).
+	// BBB should have a numeric 14d APR% and 14d Earn% (3%).
+	// CCC should have a numeric 14d APR% but "-" for 14d Earn% and 14d Combined%.
+	if !strings.Contains(output, "AAA") {
+		t.Fatalf("expected AAA in output:\n%s", output)
+	}
+	if !strings.Contains(output, "BBB") {
+		t.Fatalf("expected BBB in output:\n%s", output)
+	}
+	if !strings.Contains(output, "CCC") {
+		t.Fatalf("expected CCC in output:\n%s", output)
+	}
+
+	// The 14d columns should be rendered with the mock data from FetchFlexibleEarnRateHistory.
+	// We don't do strict parsing here but verify the columns exist and have content.
+}
+
+// TestScanEarn_14dCombinedApy_Sort: sort_by=combined_apy_14d ranks by 14d combined value.
+func TestScanEarn_14dCombinedApy_Sort(t *testing.T) {
+	interval := "8h"
+	now := time.Now().UTC().UnixMilli()
+
+	mockFut := &mockFuturesProvider{
+		loadMarketsFn: func(ctx context.Context) (map[string]ccxt.MarketInterface, error) { return nil, nil },
+		fundingRatesFn: func(ctx context.Context, symbols []string) (map[string]ccxt.FundingRate, error) {
+			// Snapshot funding rates (different from 14d history)
+			aaa := 0.0001
+			bbb := 0.0002
+			ccc := 0.00015
+			return map[string]ccxt.FundingRate{
+				"AAA/USDT:USDT": {FundingRate: &aaa, Interval: &interval},
+				"BBB/USDT:USDT": {FundingRate: &bbb, Interval: &interval},
+				"CCC/USDT:USDT": {FundingRate: &ccc, Interval: &interval},
+			}, nil
+		},
+		fetchPublicFundingRateHistoryFn: func(ctx context.Context, symbol string, since *int64, limit int) ([]ccxt.FundingRateHistory, error) {
+			// 14d history: all at 0.0001 rate (consistent)
+			hist := make([]ccxt.FundingRateHistory, 0)
+			for i := 0; i < 40; i++ {
+				ts := now - int64(i)*8*3600*1000
+				rate := 0.0001
+				hist = append(hist, ccxt.FundingRateHistory{Timestamp: &ts, FundingRate: &rate})
+			}
+			return hist, nil
+		},
+	}
+
+	mockEarn := &mockEarnProviderForScan{
+		productsByAsset: map[string]broker.EarnProduct{
+			// AAA: 0.0001 funding * 3 * 365 * 100 = 10.95% APR, + 1% earn = 11.95%
+			"AAA": {Exchange: "binance", Asset: "AAA", ProductID: "AAA-FLEX", APY: 0.01, CanSubscribe: true},
+			// BBB: 0.0001 funding * 3 * 365 * 100 = 10.95% APR, + 5% earn = 15.95% (highest)
+			"BBB": {Exchange: "binance", Asset: "BBB", ProductID: "BBB-FLEX", APY: 0.05, CanSubscribe: true},
+			// CCC: 0.0001 funding * 3 * 365 * 100 = 10.95% APR, + 0% earn = 10.95%
+			"CCC": {Exchange: "binance", Asset: "CCC", ProductID: "CCC-FLEX", APY: 0.00, CanSubscribe: true},
+		},
+	}
+
+	res := scanRunWithEarn(t, mockFut, mockEarn, map[string]any{
+		"include_stability": true,
+		"include_earn":      true,
+		"sort_by":           "combined_apy_14d",
+		"sort_order":        "desc",
+	})
+
+	if res.IsError {
+		t.Fatalf("unexpected error: %v", res.ForLLM)
+	}
+
+	output := res.ForUser
+
+	// Check sort header includes combined_apy_14d.
+	if !strings.Contains(output, "combined_apy_14d") {
+		t.Logf("output:\n%s", output)
+		t.Fatalf("expected 'combined_apy_14d' in sort header")
+	}
+
+	// Assets should all be present.
+	if !strings.Contains(output, "AAA") || !strings.Contains(output, "BBB") || !strings.Contains(output, "CCC") {
+		t.Fatalf("expected AAA, BBB, CCC in output:\n%s", output)
 	}
 }

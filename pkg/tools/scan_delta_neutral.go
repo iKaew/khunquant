@@ -102,8 +102,8 @@ func (t *ScanDeltaNeutralOpportunitiesTool) Parameters() map[string]any {
 			},
 			"sort_by": map[string]any{
 				"type":        "string",
-				"enum":        []string{"funding_rate", "apr", "7d_avg", "14d_avg", "combined_apy"},
-				"description": "Field to sort by (default 'funding_rate'). Values are SIGNED: 'funding_rate'/'apr' use the current funding/APR; '7d_avg'/'14d_avg' use the funding-history mean; 'combined_apy' uses funding APR + spot-earn APY. Sorting by '7d_avg' or '14d_avg' computes stability for ALL candidates (more API calls).",
+				"enum":        []string{"funding_rate", "apr", "7d_avg", "14d_avg", "combined_apy", "combined_apy_14d"},
+				"description": "Field to sort by (default 'funding_rate'). Values are SIGNED: 'funding_rate'/'apr' use the current funding/APR; '7d_avg'/'14d_avg' use the funding-history mean; 'combined_apy' uses funding APR + spot-earn APY; 'combined_apy_14d' uses 14-day-averaged funding APR + 14-day-averaged earn rate. Sorting by '7d_avg', '14d_avg', or 'combined_apy_14d' computes stability for ALL candidates (more API calls).",
 			},
 			"sort_order": map[string]any{
 				"type":        "string",
@@ -120,22 +120,27 @@ func (t *ScanDeltaNeutralOpportunitiesTool) Parameters() map[string]any {
 }
 
 type opportunityRow struct {
-	rank               int
-	exchange           string
-	asset              string
-	symbol             string
-	spotSymbol         string
-	spotStatus         string // "yes", "no-spot", or "unknown"
-	fundingPercent     float64
-	apr                float64
-	direction          string
-	stability7dMean    *float64 // nil if not fetched
-	stability7dStddev  *float64
-	stability14dMean   *float64
-	stability14dStddev *float64
-	earnApy            *float64 // spot-leg flexible-earn APY (percent); nil = unknown
-	combinedApy        float64  // apr + earn APY (percent); equals apr when earn unknown
-	label              string
+	rank                 int
+	exchange             string
+	asset                string
+	symbol               string
+	spotSymbol           string
+	spotStatus           string // "yes", "no-spot", or "unknown"
+	fundingPercent       float64
+	apr                  float64
+	direction            string
+	stability7dMean      *float64 // nil if not fetched
+	stability7dStddev    *float64
+	stability14dMean     *float64
+	stability14dStddev   *float64
+	earnApy              *float64 // spot-leg flexible-earn APY (percent); nil = unknown
+	combinedApy          float64  // apr + earn APY (percent); equals apr when earn unknown
+	fundingPeriodsPerDay float64  // for 14d APR calculation
+	earnProductID        string   // productID for rate-history fetch
+	earn14dMean          *float64 // trailing-14d average earn rate (percent); nil = unknown
+	apr14d               *float64 // trailing-14d average funding APR (percent); nil if no history
+	combined14d          *float64 // 14d APR + 14d Earn (percent); nil if both not present
+	label                string
 }
 
 func (t *ScanDeltaNeutralOpportunitiesTool) Execute(ctx context.Context, args map[string]any) *ToolResult {
@@ -159,7 +164,7 @@ func (t *ScanDeltaNeutralOpportunitiesTool) Execute(ctx context.Context, args ma
 		sortBy = "funding_rate"
 	}
 	if !validSortBy(sortBy) {
-		return ErrorResult(fmt.Sprintf("invalid sort_by %q (valid: funding_rate, apr, 7d_avg, 14d_avg, combined_apy)", sortBy))
+		return ErrorResult(fmt.Sprintf("invalid sort_by %q (valid: funding_rate, apr, 7d_avg, 14d_avg, combined_apy, combined_apy_14d)", sortBy))
 	}
 	if sortOrder == "" {
 		sortOrder = "desc"
@@ -168,12 +173,12 @@ func (t *ScanDeltaNeutralOpportunitiesTool) Execute(ctx context.Context, args ma
 		return ErrorResult(fmt.Sprintf("invalid sort_order %q (valid: asc, desc)", sortOrder))
 	}
 	// Sorting by a stability field requires stability stats for every candidate.
-	sortByStability := sortBy == "7d_avg" || sortBy == "14d_avg"
+	sortByStability := sortBy == "7d_avg" || sortBy == "14d_avg" || sortBy == "combined_apy_14d"
 	if sortByStability {
 		includeStability = true
 	}
 	// Sorting by combined APY requires earn data.
-	if sortBy == "combined_apy" {
+	if sortBy == "combined_apy" || sortBy == "combined_apy_14d" {
 		includeEarn = true
 	}
 	if topN <= 0 || topN > 500 {
@@ -223,7 +228,7 @@ func (t *ScanDeltaNeutralOpportunitiesTool) Execute(ctx context.Context, args ma
 	}
 
 	// Stage 1.5 (optional): Fetch flexible-earn APY for each scanned provider that
-	// succeeded, and populate earnApy + combinedApy for each row on that exchange.
+	// succeeded, and populate earnApy + earnProductID + combinedApy for each row on that exchange.
 	var earnErrs []string
 	if includeEarn && len(opportunities) > 0 {
 		for _, prov := range scanProviders {
@@ -246,18 +251,23 @@ func (t *ScanDeltaNeutralOpportunitiesTool) Execute(ctx context.Context, args ma
 				continue
 			}
 
-			// Build a map of UPPERCASE asset -> APY (fraction, e.g. 0.05 = 5%).
+			// Build maps: UPPERCASE asset -> APY (fraction) and -> ProductID.
 			assetToAPY := make(map[string]float64)
+			assetToProductID := make(map[string]string)
 			for _, prod := range products {
-				assetToAPY[strings.ToUpper(prod.Asset)] = prod.APY
+				ua := strings.ToUpper(prod.Asset)
+				assetToAPY[ua] = prod.APY
+				assetToProductID[ua] = prod.ProductID
 			}
 
-			// Set earnApy for each row of this exchange.
+			// Set earnApy + earnProductID for each row of this exchange.
 			for i := range opportunities {
 				if opportunities[i].exchange == prov {
-					if apy, exists := assetToAPY[strings.ToUpper(opportunities[i].asset)]; exists {
+					ua := strings.ToUpper(opportunities[i].asset)
+					if apy, exists := assetToAPY[ua]; exists {
 						apyPercent := apy * 100
 						opportunities[i].earnApy = &apyPercent
+						opportunities[i].earnProductID = assetToProductID[ua]
 					}
 				}
 			}
@@ -286,6 +296,76 @@ func (t *ScanDeltaNeutralOpportunitiesTool) Execute(ctx context.Context, args ma
 		})
 	} else {
 		sortOpportunities(opportunities, sortBy, sortOrder)
+	}
+
+	// Stage 1.5b (optional): Fetch 14-day average earn rates. Runs AFTER the order
+	// above so the fetched top-K matches the rows actually displayed (same set that
+	// stage 2 stability fetches), and is bounded by the same top-K to limit API cost.
+	if includeEarn && len(opportunities) > 0 {
+		topK := topKStability
+		if sortByStability {
+			topK = len(opportunities)
+			if topK > maxStabilityFetch {
+				topK = maxStabilityFetch
+			}
+		}
+		if topK > 0 {
+			if len(opportunities) < topK {
+				topK = len(opportunities)
+			}
+
+			eg, egCtx := errgroup.WithContext(ctx)
+			eg.SetLimit(4)
+			mu := sync.Mutex{}
+
+			for i := 0; i < topK; i++ {
+				i := i // capture
+				if opportunities[i].earnProductID == "" {
+					continue // No earn product for this row.
+				}
+
+				prov := opportunities[i].exchange
+				ep, errResolve := earnProvider(egCtx, t.cfg, prov, account)
+				if errResolve != nil {
+					continue // Silently skip if earn provider can't be resolved.
+				}
+
+				asset := opportunities[i].asset
+				productID := opportunities[i].earnProductID
+
+				eg.Go(func() error {
+					history, err := ep.FetchFlexibleEarnRateHistory(egCtx, productID, asset, nil, 100)
+					if err != nil || len(history) == 0 {
+						return nil // Silently skip on error / no data.
+					}
+
+					// Compute mean of points within the last 14 days.
+					now := time.Now().UnixMilli()
+					cutoffMs := now - 14*24*time.Hour.Milliseconds()
+
+					var windowed []float64
+					for _, pt := range history {
+						if pt.Timestamp >= cutoffMs {
+							windowed = append(windowed, pt.Rate)
+						}
+					}
+
+					if len(windowed) > 0 {
+						sum := 0.0
+						for _, v := range windowed {
+							sum += v
+						}
+						mean := (sum / float64(len(windowed))) * 100 // Convert fraction to percent
+						mu.Lock()
+						opportunities[i].earn14dMean = &mean
+						mu.Unlock()
+					}
+
+					return nil
+				})
+			}
+			_ = eg.Wait() // Ignore partial failures.
+		}
 	}
 
 	// Stage 2: Optionally fetch stability (across all exchanges) using each row's
@@ -336,6 +416,18 @@ func (t *ScanDeltaNeutralOpportunitiesTool) Execute(ctx context.Context, args ma
 		_ = eg.Wait() // Ignore partial failures.
 	}
 
+	// Compute 14d APR% and Combined14d% from stable14dMean and earn14dMean.
+	for i := range opportunities {
+		if opportunities[i].stability14dMean != nil {
+			apr14d := *opportunities[i].stability14dMean * opportunities[i].fundingPeriodsPerDay * 365 * 100
+			opportunities[i].apr14d = &apr14d
+		}
+		if opportunities[i].apr14d != nil && opportunities[i].earn14dMean != nil {
+			combined14d := *opportunities[i].apr14d + *opportunities[i].earn14dMean
+			opportunities[i].combined14d = &combined14d
+		}
+	}
+
 	// For stability-field sorts the values are now populated, so apply the final
 	// sort here. (funding_rate/apr were already sorted before stage 2.)
 	if sortByStability {
@@ -355,7 +447,7 @@ const maxStabilityFetch = 200
 // validSortBy reports whether s is a recognized sort field.
 func validSortBy(s string) bool {
 	switch s {
-	case "funding_rate", "apr", "7d_avg", "14d_avg", "combined_apy":
+	case "funding_rate", "apr", "7d_avg", "14d_avg", "combined_apy", "combined_apy_14d":
 		return true
 	}
 	return false
@@ -383,6 +475,11 @@ func sortOpportunities(rows []opportunityRow, sortBy, sortOrder string) {
 			return *r.stability14dMean, true
 		case "combined_apy":
 			return r.combinedApy, true
+		case "combined_apy_14d":
+			if r.combined14d == nil {
+				return 0, false
+			}
+			return *r.combined14d, true
 		default: // funding_rate
 			return r.fundingPercent, true
 		}
@@ -486,16 +583,17 @@ func (t *ScanDeltaNeutralOpportunitiesTool) scanProvider(
 		spotStatus := spotStatusFor(spotMarkets, spotSym)
 
 		row := opportunityRow{
-			rank:           symbolToIdx[futSym] + 1,
-			exchange:       provider,
-			asset:          base,
-			symbol:         futSym,
-			spotSymbol:     spotSym,
-			spotStatus:     spotStatus,
-			fundingPercent: fr * 100,
-			apr:            apr,
-			direction:      dir,
-			label:          "watch",
+			rank:                 symbolToIdx[futSym] + 1,
+			exchange:             provider,
+			asset:                base,
+			symbol:               futSym,
+			spotSymbol:           spotSym,
+			spotStatus:           spotStatus,
+			fundingPercent:       fr * 100,
+			apr:                  apr,
+			direction:            dir,
+			fundingPeriodsPerDay: periodsPerDay(rate.Interval),
+			label:                "watch",
 		}
 		// Positive carry → attractive, unless there's no spot leg available here.
 		if apr > 0 && spotStatus != "no-spot" {
@@ -645,11 +743,14 @@ func formatScanResults(opportunities []opportunityRow, limitResults int, include
 	}
 	if includeEarn {
 		dividerWidth += 22 // Two 11-char columns: Earn% and Combined%
+		if includeStability {
+			dividerWidth += 33 // Three 11-char columns: 14d APR%, 14d Earn%, 14d Combined%
+		}
 	}
 
 	if includeStability && includeEarn {
-		sb.WriteString(fmt.Sprintf("%-5s %-8s %-8s %-15s %-8s %10s %10s %-12s %10s %10s %10s %10s %10s %10s %s\n",
-			"Rank", "Exch", "Asset", "Futures", "Spot", "Funding%", "APR%", "Direction", "7d Mean%", "7d Std%", "14d Mean%", "14d Std%", "Earn%", "Combined%", "Label"))
+		sb.WriteString(fmt.Sprintf("%-5s %-8s %-8s %-15s %-8s %10s %10s %-12s %10s %10s %10s %10s %10s %10s %10s %10s %10s %s\n",
+			"Rank", "Exch", "Asset", "Futures", "Spot", "Funding%", "APR%", "Direction", "7d Mean%", "7d Std%", "14d Mean%", "14d Std%", "Earn%", "Combined%", "14d APR%", "14d Earn%", "14d Combined%", "Label"))
 	} else if includeStability {
 		sb.WriteString(fmt.Sprintf("%-5s %-8s %-8s %-15s %-8s %10s %10s %-12s %10s %10s %10s %10s %s\n",
 			"Rank", "Exch", "Asset", "Futures", "Spot", "Funding%", "APR%", "Direction", "7d Mean%", "7d Std%", "14d Mean%", "14d Std%", "Label"))
@@ -707,11 +808,28 @@ func formatScanResults(opportunities []opportunityRow, limitResults int, include
 			rowValues = append(rowValues, earnStr, combinedStr)
 		}
 
+		// Only in the includeStability && includeEarn branch, append the three 14d columns.
+		if includeStability && includeEarn {
+			apr14dStr := "-"
+			if row.apr14d != nil {
+				apr14dStr = fmt.Sprintf("%+.2f", *row.apr14d)
+			}
+			earn14dStr := "-"
+			if row.earn14dMean != nil {
+				earn14dStr = fmt.Sprintf("%+.2f", *row.earn14dMean)
+			}
+			combined14dStr := "-"
+			if row.combined14d != nil {
+				combined14dStr = fmt.Sprintf("%+.2f", *row.combined14d)
+			}
+			rowValues = append(rowValues, apr14dStr, earn14dStr, combined14dStr)
+		}
+
 		rowValues = append(rowValues, row.label)
 
 		var line string
 		if includeStability && includeEarn {
-			line = fmt.Sprintf("%-5d %-8s %-8s %-15s %-8s %10.6f %10.2f %-12s %10s %10s %10s %10s %10s %10s %s\n", rowValues...)
+			line = fmt.Sprintf("%-5d %-8s %-8s %-15s %-8s %10.6f %10.2f %-12s %10s %10s %10s %10s %10s %10s %10s %10s %10s %s\n", rowValues...)
 		} else if includeStability {
 			line = fmt.Sprintf("%-5d %-8s %-8s %-15s %-8s %10.6f %10.2f %-12s %10s %10s %10s %10s %s\n", rowValues...)
 		} else if includeEarn {
@@ -753,6 +871,9 @@ func formatScanResults(opportunities []opportunityRow, limitResults int, include
 	sb.WriteString("Spot column: 'yes' = spot pair available | 'no-spot' = perp only on that exchange | 'unknown' = could not verify.\n")
 	if includeEarn {
 		sb.WriteString("⚠️  Earn APY is variable, tiered by amount, and not guaranteed — verify on the exchange before committing.\n")
+		if includeStability {
+			sb.WriteString("⚠️  14d columns show trailing-14-day averages (14d APR% = 14-day-avg funding * periods/day * 365 * 100; 14d Earn% = 14-day-avg rate*100). 14d Combined% requires both 14d APR% and 14d Earn% to be non-nil.\n")
+		}
 	}
 	sb.WriteString("Note: Funding-only screen — drill into top picks with get_orderbook/futures_risk_summary before building a plan.\n")
 	sb.WriteString("Legend: 'attractive' = positive carry + stable | 'watch' = near-zero/unstable/no-spot | 'blocked' = no perp or no funding\n")

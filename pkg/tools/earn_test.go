@@ -128,6 +128,11 @@ func (m *mockEarnProvider) SetFlexibleAutoSubscribe(ctx context.Context, product
 	return m.setAutoSubscribeErr
 }
 
+func (m *mockEarnProvider) FetchFlexibleEarnRateHistory(ctx context.Context, productID, asset string, since *int64, limit int) ([]broker.EarnRatePoint, error) {
+	// Return empty for mock; tests can override if needed.
+	return []broker.EarnRatePoint{}, nil
+}
+
 // Mock data for testing
 var mockProducts = []broker.EarnProduct{
 	{

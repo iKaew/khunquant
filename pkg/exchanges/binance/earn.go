@@ -261,3 +261,46 @@ func (a *BinanceBrokerAdapter) SetFlexibleAutoSubscribe(ctx context.Context, pro
 	}
 	return nil
 }
+
+// FetchFlexibleEarnRateHistory returns historical rate data for a flexible earn product.
+// Calls /sapi/v1/simple-earn/flexible/history/rateHistory. Requires authentication.
+// The response annualPercentageRate is already a fraction (0.05 == 5% APY).
+func (a *BinanceBrokerAdapter) FetchFlexibleEarnRateHistory(ctx context.Context, productID, asset string, since *int64, limit int) ([]broker.EarnRatePoint, error) {
+	if err := a.requireAuth(); err != nil {
+		return nil, err
+	}
+	if productID == "" {
+		var err error
+		productID, err = a.resolveProductID(ctx, productID, asset)
+		if err != nil {
+			return nil, err
+		}
+	}
+	var points []broker.EarnRatePoint
+	err := catchPanic(func() error {
+		const size = 100
+		params := map[string]interface{}{"productId": productID, "size": size}
+		res := <-a.spot.Core.SapiGetSimpleEarnFlexibleHistoryRateHistory(params)
+		if ccxt.IsError(res) {
+			return ccxt.CreateReturnError(res)
+		}
+		rows := earnRows(res)
+		for _, row := range rows {
+			rate := earnAsFloat(row["annualPercentageRate"])
+			timestamp := int64(earnAsFloat(row["time"]))
+			points = append(points, broker.EarnRatePoint{
+				Rate:      rate,
+				Timestamp: timestamp,
+			})
+		}
+		// Cap by limit if specified (caller may pass 0 for no limit).
+		if limit > 0 && len(points) > limit {
+			points = points[:limit]
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("binance earn: fetch rate history: %w", err)
+	}
+	return points, nil
+}

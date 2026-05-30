@@ -190,3 +190,38 @@ func (a *OKXBrokerAdapter) RedeemFlexibleEarn(_ context.Context, _ /*productID*/
 func (a *OKXBrokerAdapter) SetFlexibleAutoSubscribe(_ context.Context, _ /*productID*/ string, _ string, _ bool) error {
 	return fmt.Errorf("okx earn: auto-subscribe is not configurable via API — enable 'Default Subscribe' in the OKX app")
 }
+
+// FetchFlexibleEarnRateHistory returns historical rate data for a flexible savings currency.
+// Calls /api/v5/finance/savings/lending-rate-history (PUBLIC endpoint).
+// The response rate is already a fraction (0.05 == 5% APY). productID is ignored for OKX
+// (savings are keyed by currency). asset is required.
+func (a *OKXBrokerAdapter) FetchFlexibleEarnRateHistory(ctx context.Context, productID, asset string, since *int64, limit int) ([]broker.EarnRatePoint, error) {
+	var points []broker.EarnRatePoint
+	err := catchPanic(func() error {
+		params := map[string]interface{}{
+			"ccy":   asset,
+			"limit": "100",
+		}
+		res := <-a.publicClient.Core.PublicGetFinanceSavingsLendingRateHistory(params)
+		if ccxt.IsError(res) {
+			return ccxt.CreateReturnError(res)
+		}
+		for _, row := range okxData(res) {
+			rate := okxFloat(row["rate"])
+			timestamp := int64(okxFloat(row["ts"]))
+			points = append(points, broker.EarnRatePoint{
+				Rate:      rate,
+				Timestamp: timestamp,
+			})
+		}
+		// Cap by limit if specified (caller may pass 0 for no limit).
+		if limit > 0 && len(points) > limit {
+			points = points[:limit]
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("okx earn: fetch rate history: %w", err)
+	}
+	return points, nil
+}
