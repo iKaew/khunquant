@@ -151,3 +151,38 @@ What shipped (PRD §22 MVP definition — all met):
 - `store.QueryFilter.Status` is `*string` (not `*PlanStatus`).
 - cron: `cronService.AddJob(name string, cron.CronSchedule{Kind:"every", EveryMS:&ms}, message string, deliver bool, channel, chatID) (*cron.CronJob, error)`; then `job.Payload.NoHistory=true; cronService.UpdateJob(job)`. ms via `deltaneutral.IntervalToMS(interval)`.
 - DCA wiring anchor lines (for mirroring): names.go 83-89/108/164; config.go fields 1066-1072, IsToolEnabled cases 1559-1572; defaults.go 604-622; tools.go catalog 397-436, applyToolState 684-696; helpers.go store init ~650, dca dispatch 667, tool registration 685-714.
+
+---
+
+## 🔍 Final Review (2026-05-31) — full-branch audit + close-out
+
+Verified review of the **entire** `feat/delta-neutral` branch (50+ commits beyond the S3 checkpoint above, incl. the F-series leverage/resize, earn integration, OKX/Binance futures contract-unit fixes, alert cooldown `ec026f19`, and accumulated-fees + UI redesign `5036cc0c`). I read the actual code and **did not trust sub-agent self-reports** — several sub-agent "critical" findings were overstated and discarded (the cooldown is correctly per-code so a genuinely new breach still escalates; the two-leg recovery path is correct; REST is behind SessionAuth with parameterized SQL and no secrets in DTOs).
+
+**Outcome: no blocking/critical bugs.** Feature is complete and safe to merge behind its default-disabled execution flags.
+
+### Verified strengths
+- Execution: second-leg fail → `recovery_required` + CRITICAL unhedged warning (open.go:212-237); first-leg fail aborts the second (open.go:161-187); execution tools default `Enabled:false`, dry-run unless `confirm`.
+- Financial correctness: `contractsFromNotional` rounds **DOWN** (under-hedge, futures_helpers.go:67-83); `futuresPositionSide` order-vs-position mapping; `verifyFuturesFill` partial-fill detection.
+- Scanner/IO: batch funding = **1 call**; `errgroup.SetLimit(4)`; CCXT wrapped in `catchPanic`; nil-safe funding maps; HTTP via `utils.CreateHTTPClient` w/ 15s timeout.
+- Security: SessionAuth on all 5 REST endpoints; parameterized SQL; no secrets in DTOs; WAL+FK pragmas; per-code alert cooldown.
+
+### Fixed in this review pass — commit `4ff2e3de`
+- **M1 (medium):** `health.go computeLiquidationDistance` returned `100` ("100% safe") when `markPrice == 0`, masking margin/liquidation risk for an active plan whose futures position couldn't be read. Now `Evaluate` treats an active plan with `FuturesState.MarkPrice == 0` as a data failure → `data_unavailable` (critical). Test: `TestEvaluateZeroMarkPriceEscalates`.
+- **M2 (medium):** the alert cooldown silenced **all** breach codes uniformly, so a critical condition worsening **under the same code** (liquidation distance shrinking, margin ratio climbing) was throttled for the whole `AlertCooldownDuration`. Critical codes (`data_unavailable`, `margin_critical`, `liquidation_distance_low`) are now **never** silenced → re-alert every tick; non-critical chatter stays throttled. Exported `deltaneutral.IsCriticalBreachCode`. Tests: `TestIsCriticalBreachCode`, `TestAlertCooldown_CriticalNeverSilenced`.
+- Gate: `gofmt` clean · `go build ./...` clean · `go vet` clean · `go test ./pkg/deltaneutral/... ./cmd/khunquant/internal/gateway/...` = **166 pass** · `go test ./pkg/tools/ -run DeltaNeutral` pass.
+
+### Non-blocking follow-ups (logged, NOT done — safe to defer to a cleanup pass)
+- **L1** `delta_neutral_open.go` failure paths (165/168/171/180/183/185/231) swallow `UpdateExecution`/`UpdatePlanStatus` errors. Already returns an error to the caller; add log-on-error so a failed write doesn't leave silent stale state.
+- **L2** `go refreshPlanFees(context.Background(), …)` (handler:288) is fire-and-forget: ignores the handler ctx and has no `recover()`. Transport is raw `net/http` w/ 15s timeout (no CCXT panic path), so risk is low — add `defer recover()` + a derived ctx.
+- **L3** `store.go` scan functions discard `json.Unmarshal` / `time.Parse` errors (`_ = …`) — malformed rows load as zero values silently; return/log instead.
+- **L4** `contractsFromNotional` can round to 0 contracts when notional < one min step (under-hedge to zero) without surfacing it — return a clear error on a 0 result.
+- **L5** scanner `cmc_base_url` tool arg is used unvalidated. Operator/LLM-controlled and behind SessionAuth so SSRF risk is minimal — optionally validate scheme/host.
+- **L6** OKX fees pagination tie-breaks on `uTime+1`, which can skip/double-count rows sharing a millisecond — affects the **display-only** accumulated-fees figure, not trading.
+- Style-only lint backlog (slices.Contains, fmt.Fprintf, tagged-switch, unused `computeHealthScore` params) — run `make fix` when golangci-lint is installed.
+
+### Accepted by design (not bugs)
+- Exchange-order-then-DB-persist is inherently non-atomic — mitigated by `recovery_required`, `verifyFuturesFill` partial-fill detection, dry-run + `confirm`, and default-disabled execution tools.
+- Per-request REST store open+Close mirrors the DCA pattern.
+
+### ✅ Verdict — FEATURE COMPLETE
+Functionally complete, reviewed, and safe to merge behind its default-disabled execution flags. M1/M2 landed; L1–L6 are non-blocking polish. `main` untouched; user controls the eventual PR `feat/delta-neutral` → `main`.
