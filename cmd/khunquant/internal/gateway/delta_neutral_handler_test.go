@@ -265,3 +265,130 @@ func TestMonitorSpotBalance_FallbackOnAPIFailure(t *testing.T) {
 }
 
 var errFakeEarnUnavailable = fmt.Errorf("earn API not available in test")
+
+// monitorFuturesProvider is a minimal FuturesProvider for testing.
+// It returns positions with Contracts set but ContractSize=nil to simulate OKX behaviour.
+// LoadFuturesMarkets returns a market with the given contractSize so the handler can
+// recompute notional = contracts × contractSize × markPrice.
+type monitorFuturesProvider struct {
+	contracts    float64
+	markPrice    float64
+	contractSize float64 // what LoadFuturesMarkets reports
+}
+
+func (m *monitorFuturesProvider) ID() string                     { return "mockfutures" }
+func (m *monitorFuturesProvider) Category() broker.AssetCategory { return broker.CategoryCrypto }
+func (m *monitorFuturesProvider) GetMarketStatus(_ context.Context, _ string) (broker.MarketStatus, error) {
+	return broker.MarketOpen, nil
+}
+func (m *monitorFuturesProvider) FetchFuturesMarkPrice(_ context.Context, _ string) (float64, error) {
+	return m.markPrice, nil
+}
+func (m *monitorFuturesProvider) SetFuturesLeverage(_ context.Context, _ string, _ int64, _, _ string) (map[string]interface{}, error) {
+	return nil, nil
+}
+func (m *monitorFuturesProvider) CreateFuturesOrder(_ context.Context, _ broker.FuturesOrderRequest) (ccxt.Order, error) {
+	return ccxt.Order{}, nil
+}
+func (m *monitorFuturesProvider) FetchFuturesOrder(_ context.Context, _, _ string) (ccxt.Order, error) {
+	return ccxt.Order{}, nil
+}
+func (m *monitorFuturesProvider) FetchFuturesOpenOrders(_ context.Context, _ string) ([]ccxt.Order, error) {
+	return nil, nil
+}
+func (m *monitorFuturesProvider) FetchFuturesPositions(_ context.Context, _ []string) ([]ccxt.Position, error) {
+	// ContractSize intentionally nil — simulates OKX not returning ctVal in position
+	c := m.contracts
+	return []ccxt.Position{{Contracts: &c}}, nil
+}
+func (m *monitorFuturesProvider) FetchFuturesFundingRate(_ context.Context, _ string) (ccxt.FundingRate, error) {
+	return ccxt.FundingRate{}, nil
+}
+func (m *monitorFuturesProvider) FetchFuturesFundingRates(_ context.Context, _ []string) (map[string]ccxt.FundingRate, error) {
+	return nil, nil
+}
+func (m *monitorFuturesProvider) FetchFuturesFundingHistory(_ context.Context, _ string, _ *int64, _ int) ([]ccxt.FundingHistory, error) {
+	return nil, nil
+}
+func (m *monitorFuturesProvider) FetchPublicFundingRateHistory(_ context.Context, _ string, _ *int64, _ int) ([]ccxt.FundingRateHistory, error) {
+	return nil, nil
+}
+func (m *monitorFuturesProvider) CancelFuturesOrder(_ context.Context, _, _ string) (ccxt.Order, error) {
+	return ccxt.Order{}, nil
+}
+func (m *monitorFuturesProvider) CancelAllFuturesOrders(_ context.Context, _ string) ([]ccxt.Order, error) {
+	return nil, nil
+}
+func (m *monitorFuturesProvider) LoadFuturesMarkets(_ context.Context) (map[string]ccxt.MarketInterface, error) {
+	cs := m.contractSize
+	swap := true
+	active := true
+	return map[string]ccxt.MarketInterface{
+		"CHZ/USDT:USDT": {ContractSize: &cs, Swap: &swap, Active: &active},
+	}, nil
+}
+
+// Satisfy broker.Provider
+func (m *monitorFuturesProvider) FetchTicker(_ context.Context, _ string) (ccxt.Ticker, error) {
+	return ccxt.Ticker{}, nil
+}
+func (m *monitorFuturesProvider) FetchTickers(_ context.Context, _ []string) (map[string]ccxt.Ticker, error) {
+	return nil, nil
+}
+func (m *monitorFuturesProvider) FetchOHLCV(_ context.Context, _, _ string, _ *int64, _ int) ([]ccxt.OHLCV, error) {
+	return nil, nil
+}
+func (m *monitorFuturesProvider) FetchOrderBook(_ context.Context, _ string, _ int) (ccxt.OrderBook, error) {
+	return ccxt.OrderBook{}, nil
+}
+func (m *monitorFuturesProvider) LoadMarkets(_ context.Context) (map[string]ccxt.MarketInterface, error) {
+	return nil, nil
+}
+
+// TestMonitorFuturesNotional_FallbackToMarketContractSize verifies that when OKX does
+// not include ContractSize in the position response (futuresState.NotionalUSDT stays 0),
+// the handler recomputes notional from LoadFuturesMarkets contractSize × contracts × markPrice.
+func TestMonitorFuturesNotional_FallbackToMarketContractSize(t *testing.T) {
+	store := newMonitorStore(t)
+	id, jobName := seedMonitorPlan(t, store, "mockspot")
+
+	fut := &monitorFuturesProvider{
+		contracts:    136,
+		markPrice:    0.033,
+		contractSize: 10.0, // 10 CHZ per contract → notional = 136×10×0.033 = 44.88 USDT
+	}
+	broker.RegisterFactory("mockfutures", func(_ *config.Config) (broker.Provider, error) {
+		return fut, nil
+	})
+	t.Cleanup(func() { broker.RegisterFactory("mockfutures", nil) })
+
+	// Update plan to use mockfutures for the futures leg.
+	p, err := store.GetPlan(context.Background(), id)
+	if err != nil {
+		t.Fatalf("GetPlan: %v", err)
+	}
+	p.FuturesProvider = "mockfutures"
+	if err := store.UpdatePlan(context.Background(), p); err != nil {
+		t.Fatalf("UpdatePlan: %v", err)
+	}
+
+	spot := &monitorSpotProvider{
+		tickerPrice: 0.033,
+		balances:    []broker.Balance{{Asset: "CHZ", Free: 1350.0}},
+		earnErr:     errFakeEarnUnavailable,
+	}
+
+	snap := runMonitor(t, store, id, jobName, spot)
+	if snap == nil {
+		t.Fatal("expected a snapshot to be saved")
+	}
+
+	// futures notional = 136 × 10 × 0.033 = 44.88 USDT (not 0)
+	if snap.FuturesNotionalUSDT < 40.0 {
+		t.Errorf("expected futures notional ~44.88 USDT, got %.4f (likely still 0 — contractSize fallback broken)", snap.FuturesNotionalUSDT)
+	}
+	// delta drift should be small (spot ~44.55 vs futures ~44.88, drift < 5%)
+	if snap.DeltaDriftPct > 5.0 {
+		t.Errorf("expected delta drift < 5%%, got %.2f%% (suggests notional mismatch)", snap.DeltaDriftPct)
+	}
+}

@@ -123,6 +123,19 @@ func handleDeltaNeutralMonitorJob(
 				futuresState.MarkPrice = markPrice
 			}
 
+			// OKX (and some other exchanges) do not include ContractSize in the
+			// position response, leaving NotionalUSDT = 0. Recompute from market
+			// metadata when contracts and mark price are available.
+			if futuresState.NotionalUSDT == 0 && futuresState.Contracts > 0 && futuresState.MarkPrice > 0 {
+				if markets, mktErr := futuresProv.LoadFuturesMarkets(ctx); mktErr == nil {
+					if mkt, ok := markets[plan.FuturesSymbol]; ok {
+						if mkt.ContractSize != nil && *mkt.ContractSize > 0 {
+							futuresState.NotionalUSDT = futuresState.Contracts * *mkt.ContractSize * futuresState.MarkPrice
+						}
+					}
+				}
+			}
+
 			// Fetch funding rate.
 			fr, err := futuresProv.FetchFuturesFundingRate(ctx, plan.FuturesSymbol)
 			if err != nil {
