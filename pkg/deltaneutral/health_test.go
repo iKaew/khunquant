@@ -525,6 +525,68 @@ func TestEvaluateDataUnavailable(t *testing.T) {
 	}
 }
 
+// TestEvaluateZeroMarkPriceEscalates verifies M1: an active plan whose futures leg
+// reports Available=true but a zero mark price (position could not be read) is treated
+// as a data failure, not a misleading "100% safe" liquidation distance.
+func TestEvaluateZeroMarkPriceEscalates(t *testing.T) {
+	now := time.Now()
+	plan := Plan{
+		ID:              1,
+		Name:            "test",
+		Status:          PlanStatusActive,
+		SpotProvider:    "binance",
+		FuturesProvider: "binance",
+		RiskPolicy:      DefaultRiskPolicy(),
+	}
+	plan.RiskPolicy.EscalateOnDataFailure = true
+
+	input := EvaluationInput{
+		Plan:      plan,
+		SpotState: SpotState{Available: true, Price: 50000, Quantity: 1, ValueUSDT: 50000},
+		FuturesState: FuturesState{
+			Available:    true,
+			MarkPrice:    0, // zero mark price → position unreadable
+			NotionalUSDT: 50000,
+		},
+		FundingInfo: FundingInfo{Available: true, CurrentRate: 0.0001},
+		Now:         now,
+	}
+
+	result := Evaluate(input)
+
+	if result.DataStatus != DataStatusError {
+		t.Errorf("Expected DataStatus=%s, got %s", DataStatusError, result.DataStatus)
+	}
+	found := false
+	for _, code := range result.BreachCodes {
+		if code == "data_unavailable" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("Expected breach code 'data_unavailable' for zero mark price, got %v", result.BreachCodes)
+	}
+	if result.Severity != "critical" {
+		t.Errorf("Expected Severity='critical', got %s", result.Severity)
+	}
+}
+
+// TestIsCriticalBreachCode verifies M2's critical-code set used to bypass alert cooldown.
+func TestIsCriticalBreachCode(t *testing.T) {
+	critical := []string{"data_unavailable", "margin_critical", "liquidation_distance_low"}
+	for _, c := range critical {
+		if !IsCriticalBreachCode(c) {
+			t.Errorf("expected %q to be critical", c)
+		}
+	}
+	nonCritical := []string{"funding_negative", "funding_reversal", "margin_danger", "delta_drift_high", "funding_below_min", ""}
+	for _, c := range nonCritical {
+		if IsCriticalBreachCode(c) {
+			t.Errorf("expected %q to be non-critical", c)
+		}
+	}
+}
+
 func TestEvaluateHealthyPlan(t *testing.T) {
 	now := time.Now()
 	plan := Plan{

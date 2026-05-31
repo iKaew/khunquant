@@ -30,8 +30,12 @@ func Evaluate(input EvaluationInput) HealthEvaluation {
 
 	// Step 1: Check data availability first
 	if input.Plan.Status != PlanStatusDraft && input.Plan.Status != PlanStatusReady {
-		// For active plans, check data availability
-		if !input.SpotState.Available || !input.FuturesState.Available || !input.FundingInfo.Available {
+		// For active plans, check data availability. A zero mark price means the
+		// futures position could not be read, so liquidation distance cannot be
+		// computed — treat it as a data failure rather than letting
+		// computeLiquidationDistance report a misleading "100% safe".
+		futuresDataMissing := !input.FuturesState.Available || input.FuturesState.MarkPrice == 0
+		if !input.SpotState.Available || futuresDataMissing || !input.FundingInfo.Available {
 			if input.Plan.RiskPolicy.EscalateOnDataFailure {
 				result.DataStatus = DataStatusError
 				result.ThresholdBreached = true
@@ -367,17 +371,26 @@ func detectBreaches(
 	return breaches
 }
 
+// criticalBreachCodes are breach codes whose condition can deteriorate further
+// under the same code (e.g. liquidation distance shrinking, margin ratio climbing).
+// They always map to "critical" severity and must never be throttled by the alert
+// cooldown — see IsCriticalBreachCode.
+var criticalBreachCodes = map[string]bool{
+	"data_unavailable":         true,
+	"margin_critical":          true,
+	"liquidation_distance_low": true,
+}
+
+// IsCriticalBreachCode reports whether a breach code is critical severity. The cron
+// monitor uses this to bypass alert-cooldown silencing for critical breaches so a
+// worsening position keeps re-alerting on every tick.
+func IsCriticalBreachCode(code string) bool { return criticalBreachCodes[code] }
+
 // determineSeverity determines the worst severity among breaches
 func determineSeverity(breachCodes []string) string {
 	// Severity levels: critical > danger > warn > info
 	hasCritical := false
 	hasDanger := false
-
-	criticalCodes := map[string]bool{
-		"data_unavailable":         true,
-		"margin_critical":          true,
-		"liquidation_distance_low": true,
-	}
 
 	dangerCodes := map[string]bool{
 		"funding_negative":    true,
@@ -388,7 +401,7 @@ func determineSeverity(breachCodes []string) string {
 	}
 
 	for _, code := range breachCodes {
-		if criticalCodes[code] {
+		if criticalBreachCodes[code] {
 			hasCritical = true
 		}
 		if dangerCodes[code] {

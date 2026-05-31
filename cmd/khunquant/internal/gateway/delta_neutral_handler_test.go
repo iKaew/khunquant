@@ -453,6 +453,35 @@ func TestAlertCooldown_AutoSilenceAfterBreach(t *testing.T) {
 	_ = silences // passes as long as no error
 }
 
+// TestAlertCooldown_CriticalNeverSilenced verifies M2: critical breach codes
+// (data_unavailable here, since the futures provider is absent) are NEVER added to the
+// silence table, so a worsening critical condition re-alerts on every tick instead of
+// being throttled by the cooldown window.
+func TestAlertCooldown_CriticalNeverSilenced(t *testing.T) {
+	store := newMonitorStore(t)
+	id, jobName := seedMonitorPlan(t, store, "mockspot")
+
+	spot := &monitorSpotProvider{
+		tickerPrice: 0.033,
+		balanceErr:  errFakeEarnUnavailable,
+		earnErr:     errFakeEarnUnavailable,
+	}
+
+	// A run with no futures provider yields a data_unavailable (critical) breach.
+	runMonitor(t, store, id, jobName, spot)
+
+	ctx := context.Background()
+	silences, err := store.GetActiveAlertSilences(ctx, id)
+	if err != nil {
+		t.Fatalf("GetActiveAlertSilences: %v", err)
+	}
+	for code := range silences {
+		if deltaneutral.IsCriticalBreachCode(code) {
+			t.Errorf("critical code %q must never be silenced, but found in silence table", code)
+		}
+	}
+}
+
 // TestParseSilenceDuration verifies the duration mapping.
 func TestParseSilenceDuration(t *testing.T) {
 	cases := []struct {

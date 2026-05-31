@@ -364,13 +364,23 @@ func handleDeltaNeutralMonitorJob(
 		}
 	}
 
-	// Auto-silence all breach codes for the plan's AlertCooldownDuration so the same
-	// condition doesn't invoke the LLM again until the window expires.
-	silenceUntil := time.Now().Add(parseSilenceDuration(plan.RiskPolicy.AlertCooldownDuration))
-	if siErr := dnStore.UpsertAlertSilences(ctx, planID, eval.BreachCodes, silenceUntil); siErr != nil {
-		logger.WarnCF("dn-monitor", "Failed to set alert silences", map[string]any{
-			"plan_id": planID, "error": siErr.Error(),
-		})
+	// Auto-silence non-critical breach codes for the plan's AlertCooldownDuration so the
+	// same condition doesn't invoke the LLM again until the window expires. Critical codes
+	// (liquidation_distance_low, margin_critical, data_unavailable) are NEVER silenced —
+	// they can keep worsening under the same code, so they must re-alert on every tick.
+	var silenceable []string
+	for _, c := range eval.BreachCodes {
+		if !deltaneutral.IsCriticalBreachCode(c) {
+			silenceable = append(silenceable, c)
+		}
+	}
+	if len(silenceable) > 0 {
+		silenceUntil := time.Now().Add(parseSilenceDuration(plan.RiskPolicy.AlertCooldownDuration))
+		if siErr := dnStore.UpsertAlertSilences(ctx, planID, silenceable, silenceUntil); siErr != nil {
+			logger.WarnCF("dn-monitor", "Failed to set alert silences", map[string]any{
+				"plan_id": planID, "error": siErr.Error(),
+			})
+		}
 	}
 
 	// If cronTool is available, escalate to LLM for agent explanation.
