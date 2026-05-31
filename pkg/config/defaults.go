@@ -645,6 +645,9 @@ func DefaultConfig() *Config {
 			GetDeltaNeutralHistory: ToolConfig{
 				Enabled: true,
 			},
+			PrepareDeltaNeutralPlan: ToolConfig{
+				Enabled: true,
+			},
 			OpenDeltaNeutralPosition: ToolConfig{
 				Enabled: false,
 			},

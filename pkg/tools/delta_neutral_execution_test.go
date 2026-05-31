@@ -84,10 +84,14 @@ func TestOpenDeltaNeutralPositionDryRun(t *testing.T) {
 	}
 }
 
-// TestOpenDeltaNeutralPositionRequireReady tests that only ready plans can be opened.
-func TestOpenDeltaNeutralPositionRequireReady(t *testing.T) {
+// TestOpenDeltaNeutralPositionAllowsDraft tests that draft plans can be opened directly.
+func TestOpenDeltaNeutralPositionAllowsDraft(t *testing.T) {
 	ctx := context.Background()
-	cfg := &config.Config{}
+	cfg := &config.Config{
+		TradingRisk: config.TradingRiskConfig{
+			AllowLeverage: true,
+		},
+	}
 	store := setupTempDeltaNeutralStore(t)
 	defer store.Close()
 
@@ -123,12 +127,12 @@ func TestOpenDeltaNeutralPositionRequireReady(t *testing.T) {
 		"confirm": false,
 	})
 
-	if !result.IsError {
-		t.Fatal("opening a draft plan should error")
+	if result.IsError {
+		t.Fatalf("opening a draft plan in dry-run should succeed, got: %v", result.ForLLM)
 	}
 
-	if !strings.Contains(result.ForLLM, "not ready") {
-		t.Errorf("expected 'not ready' in error, got: %s", result.ForLLM)
+	if !strings.Contains(strings.ToLower(result.ForUser), "confirm=true") {
+		t.Fatalf("expected draft dry-run review prompting confirm=true:\n%s", result.ForUser)
 	}
 }
 

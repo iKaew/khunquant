@@ -735,6 +735,7 @@ func setupCronTool(
 		cfg.Tools.IsToolEnabled("delete_delta_neutral_plan") ||
 		cfg.Tools.IsToolEnabled("get_delta_neutral_summary") ||
 		cfg.Tools.IsToolEnabled("get_delta_neutral_history") ||
+		cfg.Tools.IsToolEnabled("prepare_delta_neutral_plan") ||
 		cfg.Tools.IsToolEnabled("open_delta_neutral_position") ||
 		cfg.Tools.IsToolEnabled("unwind_delta_neutral_position")
 	if dnEnabled && dnStore != nil {
@@ -758,6 +759,9 @@ func setupCronTool(
 		}
 		if cfg.Tools.IsToolEnabled("get_delta_neutral_history") {
 			agentLoop.RegisterTool(tools.NewGetDeltaNeutralHistoryTool(dnStore))
+		}
+		if cfg.Tools.IsToolEnabled("prepare_delta_neutral_plan") {
+			agentLoop.RegisterTool(tools.NewPrepareDeltaNeutralPlanTool(cfg, dnStore))
 		}
 		if cfg.Tools.IsToolEnabled("open_delta_neutral_position") {
 			agentLoop.RegisterTool(tools.NewOpenDeltaNeutralPositionTool(cfg, dnStore))

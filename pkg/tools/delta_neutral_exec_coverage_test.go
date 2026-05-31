@@ -38,10 +38,10 @@ func TestOpenDeltaNeutralPosition_Coverage(t *testing.T) {
 		t.Fatal("expected error for unknown plan")
 	}
 
-	// Non-ready plan is rejected (only "ready" can open).
+	// Draft plan, dry-run (confirm=false) -> execution review, no orders placed.
 	draftID := seedDNPlan(t, store, "open-draft", "draft")
-	if res := tool.Execute(context.Background(), map[string]any{"plan_id": float64(draftID)}); !res.IsError {
-		t.Fatal("expected rejection of non-ready plan")
+	if res := tool.Execute(context.Background(), map[string]any{"plan_id": float64(draftID)}); res.IsError {
+		t.Fatalf("draft plan dry-run should be allowed: %v", res.ForLLM)
 	}
 
 	// Ready plan, dry-run (confirm=false) → execution review, no orders placed.
@@ -56,6 +56,10 @@ func TestOpenDeltaNeutralPosition_Coverage(t *testing.T) {
 	// No execution row should have been created by a dry-run.
 	if execs, _ := store.ListExecutions(context.Background(), readyID, 10, 0); len(execs) != 0 {
 		t.Fatalf("dry-run must not create an execution row, got %d", len(execs))
+	}
+
+	if execs, _ := store.ListExecutions(context.Background(), draftID, 10, 0); len(execs) != 0 {
+		t.Fatalf("draft dry-run must not create an execution row, got %d", len(execs))
 	}
 }
 

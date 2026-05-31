@@ -480,6 +480,12 @@ var toolCatalog = []toolCatalogEntry{
 		ConfigKey:   tools.NameGetDeltaNeutralHistory,
 	},
 	{
+		Name:        tools.NamePrepareDeltaNeutralPlan,
+		Description: tools.DescPrepareDeltaNeutralPlan,
+		Category:    tools.CatDeltaNeutral,
+		ConfigKey:   tools.NamePrepareDeltaNeutralPlan,
+	},
+	{
 		Name:        tools.NameOpenDeltaNeutralPosition,
 		Description: tools.DescOpenDeltaNeutralPosition,
 		Category:    tools.CatDeltaNeutral,
@@ -791,6 +797,8 @@ func applyToolState(cfg *config.Config, toolName string, enabled bool) error {
 		cfg.Tools.GetDeltaNeutralSummary.Enabled = enabled
 	case tools.NameGetDeltaNeutralHistory:
 		cfg.Tools.GetDeltaNeutralHistory.Enabled = enabled
+	case tools.NamePrepareDeltaNeutralPlan:
+		cfg.Tools.PrepareDeltaNeutralPlan.Enabled = enabled
 	case tools.NameOpenDeltaNeutralPosition:
 		cfg.Tools.OpenDeltaNeutralPosition.Enabled = enabled
 	case tools.NameUnwindDeltaNeutralPosition:

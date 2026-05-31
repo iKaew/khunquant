@@ -1072,13 +1072,14 @@ type ToolsConfig struct {
 	GetDCASummary   ToolConfig `json:"get_dca_summary"   envPrefix:"KHUNQUANT_TOOLS_GET_DCA_SUMMARY_"`
 
 	// Delta-Neutral (Track G)
-	CreateDeltaNeutralPlan        ToolConfig `json:"create_delta_neutral_plan"  envPrefix:"KHUNQUANT_TOOLS_CREATE_DELTA_NEUTRAL_PLAN_"`
-	ListDeltaNeutralPlans         ToolConfig `json:"list_delta_neutral_plans"   envPrefix:"KHUNQUANT_TOOLS_LIST_DELTA_NEUTRAL_PLANS_"`
-	GetDeltaNeutralPlan           ToolConfig `json:"get_delta_neutral_plan"     envPrefix:"KHUNQUANT_TOOLS_GET_DELTA_NEUTRAL_PLAN_"`
-	UpdateDeltaNeutralPlan        ToolConfig `json:"update_delta_neutral_plan"  envPrefix:"KHUNQUANT_TOOLS_UPDATE_DELTA_NEUTRAL_PLAN_"`
-	DeleteDeltaNeutralPlan        ToolConfig `json:"delete_delta_neutral_plan"  envPrefix:"KHUNQUANT_TOOLS_DELETE_DELTA_NEUTRAL_PLAN_"`
-	GetDeltaNeutralSummary        ToolConfig `json:"get_delta_neutral_summary"  envPrefix:"KHUNQUANT_TOOLS_GET_DELTA_NEUTRAL_SUMMARY_"`
-	GetDeltaNeutralHistory        ToolConfig `json:"get_delta_neutral_history"  envPrefix:"KHUNQUANT_TOOLS_GET_DELTA_NEUTRAL_HISTORY_"`
+	CreateDeltaNeutralPlan        ToolConfig `json:"create_delta_neutral_plan"   envPrefix:"KHUNQUANT_TOOLS_CREATE_DELTA_NEUTRAL_PLAN_"`
+	ListDeltaNeutralPlans         ToolConfig `json:"list_delta_neutral_plans"    envPrefix:"KHUNQUANT_TOOLS_LIST_DELTA_NEUTRAL_PLANS_"`
+	GetDeltaNeutralPlan           ToolConfig `json:"get_delta_neutral_plan"      envPrefix:"KHUNQUANT_TOOLS_GET_DELTA_NEUTRAL_PLAN_"`
+	UpdateDeltaNeutralPlan        ToolConfig `json:"update_delta_neutral_plan"   envPrefix:"KHUNQUANT_TOOLS_UPDATE_DELTA_NEUTRAL_PLAN_"`
+	DeleteDeltaNeutralPlan        ToolConfig `json:"delete_delta_neutral_plan"   envPrefix:"KHUNQUANT_TOOLS_DELETE_DELTA_NEUTRAL_PLAN_"`
+	GetDeltaNeutralSummary        ToolConfig `json:"get_delta_neutral_summary"   envPrefix:"KHUNQUANT_TOOLS_GET_DELTA_NEUTRAL_SUMMARY_"`
+	GetDeltaNeutralHistory        ToolConfig `json:"get_delta_neutral_history"   envPrefix:"KHUNQUANT_TOOLS_GET_DELTA_NEUTRAL_HISTORY_"`
+	PrepareDeltaNeutralPlan       ToolConfig `json:"prepare_delta_neutral_plan"  envPrefix:"KHUNQUANT_TOOLS_PREPARE_DELTA_NEUTRAL_PLAN_"`
 	OpenDeltaNeutralPosition      ToolConfig `json:"open_delta_neutral_position" envPrefix:"KHUNQUANT_TOOLS_OPEN_DELTA_NEUTRAL_POSITION_"`
 	UnwindDeltaNeutralPosition    ToolConfig `json:"unwind_delta_neutral_position" envPrefix:"KHUNQUANT_TOOLS_UNWIND_DELTA_NEUTRAL_POSITION_"`
 	ResizeDeltaNeutralPosition    ToolConfig `json:"resize_delta_neutral_position" envPrefix:"KHUNQUANT_TOOLS_RESIZE_DELTA_NEUTRAL_POSITION_"`
@@ -1601,6 +1602,8 @@ func (t *ToolsConfig) IsToolEnabled(name string) bool {
 		return t.GetDeltaNeutralSummary.Enabled
 	case "get_delta_neutral_history":
 		return t.GetDeltaNeutralHistory.Enabled
+	case "prepare_delta_neutral_plan":
+		return t.PrepareDeltaNeutralPlan.Enabled
 	case "open_delta_neutral_position":
 		return t.OpenDeltaNeutralPosition.Enabled
 	case "unwind_delta_neutral_position":
