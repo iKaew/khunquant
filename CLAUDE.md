@@ -80,6 +80,26 @@ make docker-run        # Run gateway in Docker
 - `.golangci.yaml` — Linter config (many rules disabled; check before enabling new ones)
 - `workspace/` — Default agent workspace and built-in configuration
 
+## Exchange API Pitfalls
+
+### Futures order `amount` is in **contracts**, not base currency
+
+On OKX and Binance, `CreateOrder` for perpetual swaps expects the `amount` parameter to be the **number of contracts**, not the base-currency quantity.
+
+Each market has a `contractSize` field (e.g. CHZ/USDT:USDT on OKX = 10 CHZ per contract). Passing raw base-currency units (e.g. `notionalUSDT / markPrice = 1351 CHZ`) instead of contract count (e.g. `1351 / 10 = 135`) inflates the order size by `contractSize`×, causing OKX error **51008 InsufficientFunds** or Binance equivalent even when the account has sufficient margin.
+
+**Always use `contractsFromNotional(notionalUSD, markPrice, contractSize, minAmount)` in `pkg/tools/futures_helpers.go` to convert a USDT notional to a contract count.** Load the market with `validateActiveSwapMarket` to get `ContractSize` and `Limits.Amount.Min`.
+
+### Futures order `side` vs position `side`
+
+Exchange order APIs use `side = "buy" | "sell"` (order direction), not `"long" | "short"` (position direction). Passing `"short"` as `side` causes OKX error **51000 Parameter side error**.
+
+Use `futuresPositionSide(positionSide string)` in `pkg/tools/futures.go` which maps:
+- `"long"` / `"buy"` → order side `"buy"`, position side `"long"`
+- `"short"` / `"sell"` → order side `"sell"`, position side `"short"`
+
+The `posSide` / `PositionSide` field in the order request is separate and correctly takes `"long"` / `"short"`.
+
 ## Dependencies
 
 Key direct dependencies: `github.com/anthropics/anthropic-sdk-go`, `github.com/openai/openai-go`, `github.com/spf13/cobra`, `github.com/rs/zerolog`, `github.com/modelcontextprotocol/go-sdk`, `modernc.org/sqlite`, `github.com/gorilla/websocket`, plus platform-specific SDKs for each chat channel.
