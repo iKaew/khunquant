@@ -77,6 +77,7 @@ export interface MemorySize {
   general_bytes: number
   snapshot_bytes: number
   dca_bytes: number
+  delta_neutral_bytes: number
   total_bytes: number
 }
 

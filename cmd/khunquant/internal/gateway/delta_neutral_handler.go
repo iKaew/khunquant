@@ -12,6 +12,7 @@ import (
 	"github.com/cryptoquantumwave/khunquant/pkg/config"
 	"github.com/cryptoquantumwave/khunquant/pkg/cron"
 	"github.com/cryptoquantumwave/khunquant/pkg/deltaneutral"
+	"github.com/cryptoquantumwave/khunquant/pkg/deltaneutral/fees"
 	"github.com/cryptoquantumwave/khunquant/pkg/logger"
 	"github.com/cryptoquantumwave/khunquant/pkg/providers/broker"
 	"github.com/cryptoquantumwave/khunquant/pkg/tools"
@@ -284,6 +285,8 @@ func handleDeltaNeutralMonitorJob(
 		// Continue; don't fail the job.
 	}
 
+	go refreshPlanFees(context.Background(), plan, dnStore, cfg)
+
 	// If no breach, return early.
 	if !eval.ThresholdBreached {
 		logger.DebugCF("dn-monitor", "No breach detected", map[string]any{
@@ -404,5 +407,50 @@ func parseSilenceDuration(s string) time.Duration {
 		return 3 * 24 * time.Hour
 	default:
 		return time.Hour
+	}
+}
+
+// refreshPlanFees fetches accumulated fees for the plan's futures leg and saves a fee snapshot.
+// Skips if the last fetch was within 30 minutes.
+func refreshPlanFees(ctx context.Context, plan *deltaneutral.Plan, store *deltaneutral.Store, cfg *config.Config) {
+	const staleness = 30 * time.Minute
+	if last, err := store.GetLatestPlanFeeSnapshot(ctx, plan.ID); err == nil && last != nil {
+		if time.Since(last.FetchedAt) < staleness {
+			return
+		}
+	}
+
+	fetcher, err := fees.NewFeesFetcher(plan.FuturesProvider, plan.FuturesAccount, cfg)
+	if err != nil {
+		logger.DebugCF("dn-fees", "provider not supported for fee fetching", map[string]any{"provider": plan.FuturesProvider})
+		return
+	}
+
+	since := plan.CreatedAt
+	if plan.OpenedAt != nil {
+		since = *plan.OpenedAt
+	}
+
+	pf, err := fetcher.FetchFuturesPositionFees(ctx, fees.FetchFeesRequest{
+		FuturesSymbol: plan.FuturesSymbol,
+		Since:         since,
+		Until:         time.Now().UTC(),
+	})
+	if err != nil {
+		logger.WarnCF("dn-fees", "fee fetch failed", map[string]any{"plan_id": plan.ID, "error": err.Error()})
+		return
+	}
+
+	now := time.Now().UTC()
+	if _, err := store.SavePlanFeeSnapshot(ctx, &deltaneutral.PlanFeeSnapshot{
+		PlanID:         plan.ID,
+		TradingFeeUSDT: pf.TradingFeeUSDT,
+		FundingFeeUSDT: pf.FundingFeeUSDT,
+		PeriodStart:    &pf.PeriodStart,
+		PeriodEnd:      &pf.PeriodEnd,
+		FetchedAt:      pf.FetchedAt,
+		CreatedAt:      now,
+	}); err != nil {
+		logger.WarnCF("dn-fees", "save fee snapshot failed", map[string]any{"plan_id": plan.ID, "error": err.Error()})
 	}
 }

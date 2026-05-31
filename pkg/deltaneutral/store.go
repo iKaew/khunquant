@@ -176,6 +176,17 @@ var migrations = []string{
         silenced_until_ms INTEGER NOT NULL, created_at TEXT NOT NULL,
         PRIMARY KEY (plan_id, breach_code));`,
 	`CREATE INDEX IF NOT EXISTS idx_dn_silences_plan ON delta_neutral_alert_silences(plan_id);`,
+	// Add fee snapshots table.
+	`CREATE TABLE IF NOT EXISTS plan_fee_snapshots (
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        plan_id          INTEGER NOT NULL REFERENCES delta_neutral_plans(id) ON DELETE CASCADE,
+        trading_fee_usdt REAL    NOT NULL DEFAULT 0,
+        funding_fee_usdt REAL    NOT NULL DEFAULT 0,
+        period_start     TEXT,
+        period_end       TEXT,
+        fetched_at       TEXT    NOT NULL,
+        created_at       TEXT    NOT NULL);`,
+	`CREATE INDEX IF NOT EXISTS idx_dn_fee_snapshots_plan ON plan_fee_snapshots(plan_id);`,
 }
 
 // Alert represents a delta-neutral alert in the database.
@@ -230,6 +241,18 @@ type ExecutionLeg struct {
 	ErrorMsg              string
 	CreatedAt             time.Time
 	UpdatedAt             time.Time
+}
+
+// PlanFeeSnapshot holds a point-in-time snapshot of accumulated fees for a plan's futures position.
+type PlanFeeSnapshot struct {
+	ID             int64
+	PlanID         int64
+	TradingFeeUSDT float64
+	FundingFeeUSDT float64
+	PeriodStart    *time.Time
+	PeriodEnd      *time.Time
+	FetchedAt      time.Time
+	CreatedAt      time.Time
 }
 
 // Store persists delta-neutral plans and monitoring in SQLite.
@@ -915,6 +938,75 @@ func (s *Store) ListExecutionLegs(ctx context.Context, executionID int64) ([]Exe
 		legs = append(legs, *leg)
 	}
 	return legs, rows.Err()
+}
+
+// SavePlanFeeSnapshot inserts a fee snapshot and sets snap.ID on success.
+func (s *Store) SavePlanFeeSnapshot(ctx context.Context, snap *PlanFeeSnapshot) (int64, error) {
+	var periodStart, periodEnd *string
+	if snap.PeriodStart != nil {
+		v := snap.PeriodStart.Format(time.RFC3339)
+		periodStart = &v
+	}
+	if snap.PeriodEnd != nil {
+		v := snap.PeriodEnd.Format(time.RFC3339)
+		periodEnd = &v
+	}
+
+	res, err := s.db.ExecContext(ctx,
+		`INSERT INTO plan_fee_snapshots
+		 (plan_id, trading_fee_usdt, funding_fee_usdt, period_start, period_end, fetched_at, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		snap.PlanID, snap.TradingFeeUSDT, snap.FundingFeeUSDT,
+		periodStart, periodEnd,
+		snap.FetchedAt.Format(time.RFC3339), snap.CreatedAt.Format(time.RFC3339),
+	)
+	if err != nil {
+		return 0, fmt.Errorf("deltaneutral: insert fee snapshot: %w", err)
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	snap.ID = id
+	return id, nil
+}
+
+// GetLatestPlanFeeSnapshot returns the most recent fee snapshot for a plan, or nil if none.
+func (s *Store) GetLatestPlanFeeSnapshot(ctx context.Context, planID int64) (*PlanFeeSnapshot, error) {
+	row := s.db.QueryRowContext(ctx,
+		`SELECT id, plan_id, trading_fee_usdt, funding_fee_usdt, period_start, period_end, fetched_at, created_at
+		 FROM plan_fee_snapshots WHERE plan_id = ? ORDER BY fetched_at DESC LIMIT 1`,
+		planID,
+	)
+	var snap PlanFeeSnapshot
+	var periodStart, periodEnd *string
+	var fetchedAt, createdAt string
+
+	err := row.Scan(
+		&snap.ID, &snap.PlanID,
+		&snap.TradingFeeUSDT, &snap.FundingFeeUSDT,
+		&periodStart, &periodEnd,
+		&fetchedAt, &createdAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	snap.FetchedAt, _ = time.Parse(time.RFC3339, fetchedAt)
+	snap.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
+	if periodStart != nil {
+		t, _ := time.Parse(time.RFC3339, *periodStart)
+		snap.PeriodStart = &t
+	}
+	if periodEnd != nil {
+		t, _ := time.Parse(time.RFC3339, *periodEnd)
+		snap.PeriodEnd = &t
+	}
+
+	return &snap, nil
 }
 
 // Helper functions

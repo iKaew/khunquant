@@ -238,10 +238,11 @@ func (h *Handler) handleCreateMemoryFile(w http.ResponseWriter, r *http.Request)
 }
 
 type agentMemorySizeInfo struct {
-	GeneralBytes  int64 `json:"general_bytes"`
-	SnapshotBytes int64 `json:"snapshot_bytes"`
-	DCABytes      int64 `json:"dca_bytes"`
-	TotalBytes    int64 `json:"total_bytes"`
+	GeneralBytes       int64 `json:"general_bytes"`
+	SnapshotBytes      int64 `json:"snapshot_bytes"`
+	DCABytes           int64 `json:"dca_bytes"`
+	DeltaNeutralBytes  int64 `json:"delta_neutral_bytes"`
+	TotalBytes         int64 `json:"total_bytes"`
 }
 
 func (h *Handler) handleMemorySize(w http.ResponseWriter, r *http.Request) {
@@ -297,12 +298,18 @@ func (h *Handler) handleMemorySize(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 
+	var deltaNeutralBytes int64
+	if info, err := os.Stat(filepath.Join(memDir, "delta_neutral", "delta_neutral.db")); err == nil {
+		deltaNeutralBytes = info.Size()
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(agentMemorySizeInfo{
-		GeneralBytes:  generalBytes,
-		SnapshotBytes: snapshotBytes,
-		DCABytes:      dcaBytes,
-		TotalBytes:    generalBytes + snapshotBytes + dcaBytes,
+		GeneralBytes:      generalBytes,
+		SnapshotBytes:     snapshotBytes,
+		DCABytes:          dcaBytes,
+		DeltaNeutralBytes: deltaNeutralBytes,
+		TotalBytes:        generalBytes + snapshotBytes + dcaBytes + deltaNeutralBytes,
 	})
 }
 

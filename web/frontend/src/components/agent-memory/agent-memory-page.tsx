@@ -212,6 +212,11 @@ export function AgentMemoryPage() {
           </TabsTrigger>
           <TabsTrigger value="delta_neutral">
             {t("pages.agent.agent_memory.tabs.delta_neutral")}
+            {sizeInfo != null && (
+              <span className="text-muted-foreground ml-1.5 text-xs font-normal">
+                ({formatBytes(sizeInfo.delta_neutral_bytes)})
+              </span>
+            )}
           </TabsTrigger>
         </TabsList>
 

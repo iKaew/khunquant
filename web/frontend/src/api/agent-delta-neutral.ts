@@ -18,6 +18,11 @@ export interface DeltaNeutralPlanListItem {
   health_label: string
   last_checked_at?: string
   last_alert_at?: string
+  fee_snapshot?: {
+    trading_fee_usdt: number
+    funding_fee_usdt: number
+    fetched_at: string
+  } | null
   created_at: string
   updated_at: string
 }

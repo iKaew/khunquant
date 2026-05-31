@@ -11,29 +11,37 @@ import (
 	"github.com/cryptoquantumwave/khunquant/pkg/deltaneutral"
 )
 
+// dnFeeSnapshot represents accumulated fees for a plan's futures position.
+type dnFeeSnapshot struct {
+	TradingFeeUSDT float64   `json:"trading_fee_usdt"`
+	FundingFeeUSDT float64   `json:"funding_fee_usdt"`
+	FetchedAt      time.Time `json:"fetched_at"`
+}
+
 // dnPlanListItem represents a delta-neutral plan in list responses
 type dnPlanListItem struct {
-	ID              int64      `json:"id"`
-	Name            string     `json:"name"`
-	Asset           string     `json:"asset"`
-	Status          string     `json:"status"`
-	Mode            string     `json:"mode"`
-	SpotProvider    string     `json:"spot_provider"`
-	SpotAccount     string     `json:"spot_account"`
-	SpotSymbol      string     `json:"spot_symbol"`
-	FuturesProvider string     `json:"futures_provider"`
-	FuturesAccount  string     `json:"futures_account"`
-	FuturesSymbol   string     `json:"futures_symbol"`
-	CapitalUSDT     float64    `json:"capital_usdt"`
-	MonitorInterval string     `json:"monitor_interval"`
-	Enabled         bool       `json:"enabled"`
-	CrossExchange   bool       `json:"cross_exchange"`
-	HealthScore     int        `json:"health_score"`
-	HealthLabel     string     `json:"health_label"`
-	LastCheckedAt   *time.Time `json:"last_checked_at,omitempty"`
-	LastAlertAt     *time.Time `json:"last_alert_at,omitempty"`
-	CreatedAt       time.Time  `json:"created_at"`
-	UpdatedAt       time.Time  `json:"updated_at"`
+	ID              int64          `json:"id"`
+	Name            string         `json:"name"`
+	Asset           string         `json:"asset"`
+	Status          string         `json:"status"`
+	Mode            string         `json:"mode"`
+	SpotProvider    string         `json:"spot_provider"`
+	SpotAccount     string         `json:"spot_account"`
+	SpotSymbol      string         `json:"spot_symbol"`
+	FuturesProvider string         `json:"futures_provider"`
+	FuturesAccount  string         `json:"futures_account"`
+	FuturesSymbol   string         `json:"futures_symbol"`
+	CapitalUSDT     float64        `json:"capital_usdt"`
+	MonitorInterval string         `json:"monitor_interval"`
+	Enabled         bool           `json:"enabled"`
+	CrossExchange   bool           `json:"cross_exchange"`
+	HealthScore     int            `json:"health_score"`
+	HealthLabel     string         `json:"health_label"`
+	LastCheckedAt   *time.Time     `json:"last_checked_at,omitempty"`
+	LastAlertAt     *time.Time     `json:"last_alert_at,omitempty"`
+	FeeSnapshot     *dnFeeSnapshot `json:"fee_snapshot,omitempty"`
+	CreatedAt       time.Time      `json:"created_at"`
+	UpdatedAt       time.Time      `json:"updated_at"`
 }
 
 // dnMonitorSnapshotDTO represents a monitor snapshot response
@@ -193,6 +201,16 @@ func (h *Handler) handleListDeltaNeutralPlans(w http.ResponseWriter, r *http.Req
 			item.LastAlertAt = &alert.TriggeredAt
 		}
 
+		// Enrich with latest fee snapshot
+		feeSnap, err := store.GetLatestPlanFeeSnapshot(r.Context(), plans[i].ID)
+		if err == nil && feeSnap != nil {
+			item.FeeSnapshot = &dnFeeSnapshot{
+				TradingFeeUSDT: feeSnap.TradingFeeUSDT,
+				FundingFeeUSDT: feeSnap.FundingFeeUSDT,
+				FetchedAt:      feeSnap.FetchedAt,
+			}
+		}
+
 		items[i] = item
 	}
 
@@ -240,6 +258,16 @@ func (h *Handler) handleGetDeltaNeutralPlan(w http.ResponseWriter, r *http.Reque
 	alert, err := store.LatestAlert(r.Context(), id)
 	if err == nil && alert != nil {
 		item.LastAlertAt = &alert.TriggeredAt
+	}
+
+	// Enrich with latest fee snapshot
+	feeSnap, err := store.GetLatestPlanFeeSnapshot(r.Context(), id)
+	if err == nil && feeSnap != nil {
+		item.FeeSnapshot = &dnFeeSnapshot{
+			TradingFeeUSDT: feeSnap.TradingFeeUSDT,
+			FundingFeeUSDT: feeSnap.FundingFeeUSDT,
+			FetchedAt:      feeSnap.FetchedAt,
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")

@@ -1092,3 +1092,92 @@ func TestAlertSilences_ClearAll(t *testing.T) {
 		t.Errorf("expected all silences cleared, got %d", len(silences))
 	}
 }
+
+// --- Fee snapshot tests ---
+
+func TestSavePlanFeeSnapshot(t *testing.T) {
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	plan := createTestPlan(t, "fee-snap-save")
+	planID, _ := store.SavePlan(ctx, plan)
+
+	now := time.Now().UTC().Truncate(time.Second)
+	start := now.Add(-time.Hour)
+	end := now
+
+	snap := &PlanFeeSnapshot{
+		PlanID:         planID,
+		TradingFeeUSDT: -0.123,
+		FundingFeeUSDT: 0.456,
+		PeriodStart:    &start,
+		PeriodEnd:      &end,
+		FetchedAt:      now,
+		CreatedAt:      now,
+	}
+
+	id, err := store.SavePlanFeeSnapshot(ctx, snap)
+	if err != nil {
+		t.Fatalf("SavePlanFeeSnapshot: %v", err)
+	}
+	if id <= 0 {
+		t.Errorf("expected positive ID, got %d", id)
+	}
+	if snap.ID != id {
+		t.Errorf("snap.ID not updated: got %d, want %d", snap.ID, id)
+	}
+}
+
+func TestGetLatestPlanFeeSnapshot(t *testing.T) {
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	plan := createTestPlan(t, "fee-snap-latest")
+	planID, _ := store.SavePlan(ctx, plan)
+
+	// No snapshot yet — should return nil.
+	snap, err := store.GetLatestPlanFeeSnapshot(ctx, planID)
+	if err != nil {
+		t.Fatalf("GetLatestPlanFeeSnapshot (empty): %v", err)
+	}
+	if snap != nil {
+		t.Fatalf("expected nil for empty plan, got %+v", snap)
+	}
+
+	now := time.Now().UTC().Truncate(time.Second)
+	start := now.Add(-2 * time.Hour)
+	end := now
+
+	store.SavePlanFeeSnapshot(ctx, &PlanFeeSnapshot{
+		PlanID: planID, TradingFeeUSDT: -1.0, FundingFeeUSDT: 0.5,
+		PeriodStart: &start, PeriodEnd: &end, FetchedAt: now.Add(-time.Minute), CreatedAt: now.Add(-time.Minute),
+	})
+	// Insert a later one — should be returned as latest.
+	later := now
+	store.SavePlanFeeSnapshot(ctx, &PlanFeeSnapshot{
+		PlanID: planID, TradingFeeUSDT: -2.5, FundingFeeUSDT: 1.25,
+		PeriodStart: &start, PeriodEnd: &end, FetchedAt: later, CreatedAt: later,
+	})
+
+	got, err := store.GetLatestPlanFeeSnapshot(ctx, planID)
+	if err != nil {
+		t.Fatalf("GetLatestPlanFeeSnapshot: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected snapshot, got nil")
+	}
+	if got.TradingFeeUSDT != -2.5 {
+		t.Errorf("TradingFeeUSDT: got %v, want -2.5", got.TradingFeeUSDT)
+	}
+	if got.FundingFeeUSDT != 1.25 {
+		t.Errorf("FundingFeeUSDT: got %v, want 1.25", got.FundingFeeUSDT)
+	}
+	if got.PeriodStart == nil {
+		t.Error("PeriodStart should not be nil")
+	}
+	if got.PeriodEnd == nil {
+		t.Error("PeriodEnd should not be nil")
+	}
+}
