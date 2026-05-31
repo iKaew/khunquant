@@ -163,10 +163,59 @@ func handleDeltaNeutralMonitorJob(
 				if ticker.Last != nil {
 					spotState.Price = *ticker.Last
 				}
-				// For now, use the plan's spot notional value if we can't get balance.
-				// In a more complete implementation, we'd fetch the actual balance.
-				spotState.Quantity = plan.SpotNotionalUSDT / spotState.Price
-				spotState.ValueUSDT = plan.SpotNotionalUSDT
+
+				// Parse base currency from spot symbol: "CHZ/USDT" → "CHZ"
+				baseCur := plan.SpotSymbol
+				if idx := strings.Index(plan.SpotSymbol, "/"); idx > 0 {
+					baseCur = plan.SpotSymbol[:idx]
+				}
+
+				totalQty := 0.0
+				fetchedAny := false
+
+				// 1. Real spot / trading-account balance.
+				if pp, ok := spotFetcher.(broker.PortfolioProvider); ok {
+					if balances, balErr := pp.GetBalances(ctx); balErr == nil {
+						for _, b := range balances {
+							if b.Asset == baseCur {
+								totalQty += b.Free
+								fetchedAny = true
+							}
+						}
+					} else {
+						logger.WarnCF("dn-monitor", "Failed to fetch spot balances", map[string]any{
+							"plan_id": planID, "error": balErr.Error(),
+						})
+					}
+				}
+
+				// 2. Earn / savings balance for the same asset.
+				// OKX and Binance both implement EarnProvider; CHZ in Flexible Earn still
+				// backs the spot leg of the hedge, so it must count toward spotState.
+				if ep, ok := spotFetcher.(broker.EarnProvider); ok {
+					if positions, epErr := ep.FetchFlexibleEarnPositions(ctx); epErr == nil {
+						for _, p := range positions {
+							if p.Asset == baseCur {
+								totalQty += p.Amount
+								fetchedAny = true
+							}
+						}
+					} else {
+						logger.WarnCF("dn-monitor", "Failed to fetch earn positions", map[string]any{
+							"plan_id": planID, "error": epErr.Error(),
+						})
+					}
+				}
+
+				// Fall back to plan notional if both API calls failed, to avoid
+				// triggering a false drift alarm when APIs are temporarily down.
+				if fetchedAny {
+					spotState.Quantity = totalQty
+					spotState.ValueUSDT = totalQty * spotState.Price
+				} else {
+					spotState.Quantity = plan.SpotNotionalUSDT / spotState.Price
+					spotState.ValueUSDT = plan.SpotNotionalUSDT
+				}
 			}
 		}
 	}
