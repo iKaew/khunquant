@@ -674,10 +674,10 @@ func readLogsHandler(d Deps) mcp.ToolHandler {
 			}
 		}
 
-		// Truncate long field values (e.g. result_b64=QmFsYW5jZXM...)
+		// Strip ANSI colour codes then truncate long field values.
 		truncated := make([]string, len(lines))
 		for i, l := range lines {
-			truncated[i] = truncateLongValues(l)
+			truncated[i] = truncateLongValues(stripANSI(l))
 		}
 
 		output := map[string]interface{}{
