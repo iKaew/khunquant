@@ -27,6 +27,7 @@ const (
 	oauthProviderOpenAI            = "openai"
 	oauthProviderAnthropic         = "anthropic"
 	oauthProviderGoogleAntigravity = "google-antigravity"
+	oauthProviderGoogleGemini      = "google-gemini"
 
 	oauthMethodBrowser    = "browser"
 	oauthMethodDeviceCode = "device_code"
@@ -48,18 +49,21 @@ var oauthProviderOrder = []string{
 	oauthProviderOpenAI,
 	oauthProviderAnthropic,
 	oauthProviderGoogleAntigravity,
+	oauthProviderGoogleGemini,
 }
 
 var oauthProviderMethods = map[string][]string{
 	oauthProviderOpenAI:            {oauthMethodBrowser, oauthMethodDeviceCode, oauthMethodToken},
 	oauthProviderAnthropic:         {oauthMethodToken},
 	oauthProviderGoogleAntigravity: {oauthMethodBrowser},
+	oauthProviderGoogleGemini:      {oauthMethodBrowser},
 }
 
 var oauthProviderLabels = map[string]string{
 	oauthProviderOpenAI:            "OpenAI",
 	oauthProviderAnthropic:         "Anthropic",
 	oauthProviderGoogleAntigravity: "Google Antigravity",
+	oauthProviderGoogleGemini:      "Google Gemini Code Assist",
 }
 
 var (
@@ -97,17 +101,24 @@ type oauthFlow struct {
 	Interval     int
 }
 
+type oauthModelPreset struct {
+	Label   string `json:"label"`
+	ModelID string `json:"model_id"`
+}
+
 type oauthProviderStatus struct {
-	Provider    string   `json:"provider"`
-	DisplayName string   `json:"display_name"`
-	Methods     []string `json:"methods"`
-	LoggedIn    bool     `json:"logged_in"`
-	Status      string   `json:"status"`
-	AuthMethod  string   `json:"auth_method,omitempty"`
-	ExpiresAt   string   `json:"expires_at,omitempty"`
-	AccountID   string   `json:"account_id,omitempty"`
-	Email       string   `json:"email,omitempty"`
-	ProjectID   string   `json:"project_id,omitempty"`
+	Provider     string             `json:"provider"`
+	DisplayName  string             `json:"display_name"`
+	Methods      []string           `json:"methods"`
+	LoggedIn     bool               `json:"logged_in"`
+	Status       string             `json:"status"`
+	AuthMethod   string             `json:"auth_method,omitempty"`
+	ExpiresAt    string             `json:"expires_at,omitempty"`
+	AccountID    string             `json:"account_id,omitempty"`
+	Email        string             `json:"email,omitempty"`
+	ProjectID    string             `json:"project_id,omitempty"`
+	ModelPresets []oauthModelPreset `json:"model_presets,omitempty"`
+	ActiveModel  string             `json:"active_model,omitempty"`
 }
 
 type oauthFlowResponse struct {
@@ -125,6 +136,7 @@ type oauthFlowResponse struct {
 // registerOAuthRoutes binds OAuth login/logout endpoints to the ServeMux.
 func (h *Handler) registerOAuthRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/oauth/providers", h.handleListOAuthProviders)
+	mux.HandleFunc("POST /api/oauth/providers/{provider}/select-model", h.handleSelectProviderModel)
 	mux.HandleFunc("POST /api/oauth/login", h.handleOAuthLogin)
 	mux.HandleFunc("GET /api/oauth/flows/{id}", h.handleGetOAuthFlow)
 	mux.HandleFunc("POST /api/oauth/flows/{id}/poll", h.handlePollOAuthFlow)
@@ -134,6 +146,11 @@ func (h *Handler) registerOAuthRoutes(mux *http.ServeMux) {
 
 func (h *Handler) handleListOAuthProviders(w http.ResponseWriter, r *http.Request) {
 	providersResp := make([]oauthProviderStatus, 0, len(oauthProviderOrder))
+
+	cfg, cfgErr := oauthLoadConfig(h.configPath)
+	if cfgErr != nil && errors.Is(cfgErr, credential.ErrDecryptionFailed) {
+		cfg, cfgErr = config.LoadConfigSkipSecurity(h.configPath)
+	}
 
 	for _, provider := range oauthProviderOrder {
 		cred, err := oauthGetCredential(provider)
@@ -164,6 +181,18 @@ func (h *Handler) handleListOAuthProviders(w http.ResponseWriter, r *http.Reques
 				item.Status = "needs_refresh"
 			default:
 				item.Status = "connected"
+			}
+		}
+
+		if presets, ok := oauthProviderModelPresets[provider]; ok {
+			item.ModelPresets = presets
+		}
+		if cfgErr == nil && cfg != nil {
+			for _, mc := range cfg.ModelList {
+				if modelBelongsToProvider(provider, mc.Model) {
+					item.ActiveModel = mc.Model
+					break
+				}
 			}
 		}
 
@@ -542,7 +571,9 @@ func normalizeOAuthProvider(raw string) (string, error) {
 	switch provider {
 	case "antigravity":
 		return oauthProviderGoogleAntigravity, nil
-	case oauthProviderOpenAI, oauthProviderAnthropic, oauthProviderGoogleAntigravity:
+	case "gemini-code-assist", "gemini-cli":
+		return oauthProviderGoogleGemini, nil
+	case oauthProviderOpenAI, oauthProviderAnthropic, oauthProviderGoogleAntigravity, oauthProviderGoogleGemini:
 		return provider, nil
 	default:
 		return "", fmt.Errorf("unsupported provider %q", raw)
@@ -565,6 +596,8 @@ func oauthConfigForProvider(provider string) (auth.OAuthProviderConfig, error) {
 		return auth.OpenAIOAuthConfig(), nil
 	case oauthProviderGoogleAntigravity:
 		return auth.GoogleAntigravityOAuthConfig(), nil
+	case oauthProviderGoogleGemini:
+		return auth.GoogleGeminiOAuthConfig(), nil
 	default:
 		return auth.OAuthProviderConfig{}, fmt.Errorf("provider %q does not support browser oauth", provider)
 	}
@@ -800,7 +833,7 @@ func (h *Handler) persistCredentialAndConfig(provider, authMethod string, cred *
 		cp.AuthMethod = authMethod
 	}
 
-	if provider == oauthProviderGoogleAntigravity {
+	if provider == oauthProviderGoogleAntigravity || provider == oauthProviderGoogleGemini {
 		if cp.Email == "" {
 			email, err := oauthFetchGoogleUserEmailFunc(cp.AccessToken)
 			if err != nil {
@@ -812,7 +845,7 @@ func (h *Handler) persistCredentialAndConfig(provider, authMethod string, cred *
 		if cp.ProjectID == "" {
 			projectID, err := oauthFetchAntigravityProject(cp.AccessToken)
 			if err != nil {
-				log.Printf("oauth warning: could not fetch antigravity project id: %v", err)
+				log.Printf("oauth warning: could not fetch project id: %v", err)
 			} else {
 				cp.ProjectID = projectID
 			}
@@ -849,6 +882,8 @@ func (h *Handler) syncProviderAuthMethod(provider, authMethod string) error {
 		cfg.Providers.Anthropic.AuthMethod = authMethod
 	case oauthProviderGoogleAntigravity:
 		cfg.Providers.Antigravity.AuthMethod = authMethod
+	case oauthProviderGoogleGemini:
+		cfg.Providers.GeminiCodeAssist.AuthMethod = authMethod
 	default:
 		return fmt.Errorf("unsupported provider %q", provider)
 	}
@@ -880,34 +915,126 @@ func modelBelongsToProvider(provider, model string) bool {
 			lower == "google-antigravity" ||
 			strings.HasPrefix(lower, "antigravity/") ||
 			strings.HasPrefix(lower, "google-antigravity/")
+	case oauthProviderGoogleGemini:
+		return lower == "gemini-code-assist" ||
+			lower == "google-gemini" ||
+			strings.HasPrefix(lower, "gemini-code-assist/") ||
+			strings.HasPrefix(lower, "google-gemini/")
 	default:
 		return false
 	}
 }
 
 func defaultModelConfigForProvider(provider, authMethod string) config.ModelConfig {
-	switch provider {
-	case oauthProviderOpenAI:
-		return config.ModelConfig{
-			ModelName:  "gpt-5.3-codex",
-			Model:      "openai/gpt-5.3-codex",
-			AuthMethod: authMethod,
-		}
-	case oauthProviderAnthropic:
-		return config.ModelConfig{
-			ModelName:  "claude-sonnet-4.6",
-			Model:      "anthropic/claude-sonnet-4.6",
-			AuthMethod: authMethod,
-		}
-	case oauthProviderGoogleAntigravity:
-		return config.ModelConfig{
-			ModelName:  "gemini-flash",
-			Model:      "antigravity/gemini-3-flash",
-			AuthMethod: authMethod,
-		}
-	default:
+	modelID := defaultModelForProvider(provider)
+	if modelID == "" {
 		return config.ModelConfig{}
 	}
+	modelName := modelNameFromPreset(provider, modelID)
+	if modelName == "" {
+		if idx := strings.LastIndex(modelID, "/"); idx >= 0 {
+			modelName = modelID[idx+1:]
+		} else {
+			modelName = modelID
+		}
+	}
+	return config.ModelConfig{
+		ModelName:  modelName,
+		Model:      modelID,
+		AuthMethod: authMethod,
+	}
+}
+
+func modelNameFromPreset(provider, modelID string) string {
+	for _, p := range oauthProviderModelPresets[provider] {
+		if p.ModelID == modelID {
+			slug := strings.ToLower(p.Label)
+			slug = strings.ReplaceAll(slug, " ", "-")
+			return slug
+		}
+	}
+	if idx := strings.LastIndex(modelID, "/"); idx >= 0 {
+		return modelID[idx+1:]
+	}
+	return modelID
+}
+
+func (h *Handler) handleSelectProviderModel(w http.ResponseWriter, r *http.Request) {
+	rawProvider := r.PathValue("provider")
+	provider, err := normalizeOAuthProvider(rawProvider)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<16))
+	if err != nil {
+		http.Error(w, "failed to read request body", http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+
+	var req struct {
+		ModelID string `json:"model_id"`
+	}
+	if err = json.Unmarshal(body, &req); err != nil {
+		http.Error(w, fmt.Sprintf("invalid JSON: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	modelID := strings.TrimSpace(req.ModelID)
+	if modelID == "" {
+		http.Error(w, "model_id is required", http.StatusBadRequest)
+		return
+	}
+	if !modelBelongsToProvider(provider, modelID) {
+		http.Error(w, fmt.Sprintf("model %q does not belong to provider %q", modelID, provider), http.StatusBadRequest)
+		return
+	}
+
+	cfg, cfgErr := oauthLoadConfig(h.configPath)
+	if cfgErr != nil && errors.Is(cfgErr, credential.ErrDecryptionFailed) {
+		cfg, cfgErr = config.LoadConfigSkipSecurity(h.configPath)
+	}
+	if cfgErr != nil {
+		http.Error(w, fmt.Sprintf("failed to load config: %v", cfgErr), http.StatusInternalServerError)
+		return
+	}
+
+	modelName := ""
+	found := false
+	for i := range cfg.ModelList {
+		if modelBelongsToProvider(provider, cfg.ModelList[i].Model) {
+			cfg.ModelList[i].Model = modelID
+			cfg.ModelList[i].ModelName = modelNameFromPreset(provider, modelID)
+			modelName = cfg.ModelList[i].ModelName
+			found = true
+			break
+		}
+	}
+	if !found {
+		mc := defaultModelConfigForProvider(provider, "oauth")
+		mc.Model = modelID
+		mc.ModelName = modelNameFromPreset(provider, modelID)
+		cfg.ModelList = append(cfg.ModelList, mc)
+		modelName = mc.ModelName
+	}
+
+	if modelName != "" {
+		cfg.Agents.Defaults.ModelName = modelName
+	}
+
+	if err := oauthSaveConfig(h.configPath, cfg); err != nil {
+		http.Error(w, fmt.Sprintf("failed to save config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"status":     "ok",
+		"model_id":   modelID,
+		"model_name": modelName,
+	})
 }
 
 func fetchGoogleUserEmail(accessToken string) (string, error) {

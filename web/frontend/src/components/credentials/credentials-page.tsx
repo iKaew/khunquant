@@ -7,6 +7,7 @@ import { useCredentialsPage } from "@/hooks/use-credentials-page"
 import { AnthropicCredentialCard } from "./anthropic-credential-card"
 import { AntigravityCredentialCard } from "./antigravity-credential-card"
 import { DeviceCodeSheet } from "./device-code-sheet"
+import { GeminiCredentialCard } from "./gemini-credential-card"
 import { LogoutConfirmDialog } from "./logout-confirm-dialog"
 import { OpenAICredentialCard } from "./openai-credential-card"
 
@@ -23,11 +24,13 @@ export function CredentialsPage() {
     openaiStatus,
     anthropicStatus,
     antigravityStatus,
+    geminiStatus,
     logoutDialogOpen,
     logoutConfirmProvider,
     logoutProviderLabel,
     deviceSheetOpen,
     deviceFlow,
+    selectingModel,
     setOpenAIToken,
     setAnthropicToken,
     startBrowserOAuth,
@@ -38,6 +41,7 @@ export function CredentialsPage() {
     handleConfirmLogout,
     handleLogoutDialogOpenChange,
     handleDeviceSheetOpenChange,
+    selectModel,
   } = useCredentialsPage()
 
   return (
@@ -70,10 +74,11 @@ export function CredentialsPage() {
             {t("credentials.loading")}
           </div>
         ) : (
-          <div className="grid grid-cols-1 gap-4 py-5 lg:auto-rows-fr lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 py-5 lg:auto-rows-fr lg:grid-cols-3 xl:grid-cols-4">
             <OpenAICredentialCard
               status={openaiStatus}
               activeAction={activeAction}
+              selectingModel={selectingModel}
               token={openAIToken}
               onTokenChange={setOpenAIToken}
               onStartBrowserOAuth={() => void startBrowserOAuth("openai")}
@@ -81,11 +86,13 @@ export function CredentialsPage() {
               onStopLoading={stopLoading}
               onSaveToken={() => void saveToken("openai", openAIToken.trim())}
               onAskLogout={() => askLogout("openai")}
+              onSelectModel={(modelID) => void selectModel("openai", modelID)}
             />
 
             <AnthropicCredentialCard
               status={anthropicStatus}
               activeAction={activeAction}
+              selectingModel={selectingModel}
               token={anthropicToken}
               onTokenChange={setAnthropicToken}
               onStopLoading={stopLoading}
@@ -93,16 +100,33 @@ export function CredentialsPage() {
                 void saveToken("anthropic", anthropicToken.trim())
               }
               onAskLogout={() => askLogout("anthropic")}
+              onSelectModel={(modelID) =>
+                void selectModel("anthropic", modelID)
+              }
             />
 
             <AntigravityCredentialCard
               status={antigravityStatus}
               activeAction={activeAction}
+              selectingModel={selectingModel}
               onStopLoading={stopLoading}
               onStartBrowserOAuth={() =>
                 void startBrowserOAuth("google-antigravity")
               }
               onAskLogout={() => askLogout("google-antigravity")}
+              onSelectModel={(modelID) =>
+                void selectModel("google-antigravity", modelID)
+              }
+            />
+
+            <GeminiCredentialCard
+              status={geminiStatus}
+              activeAction={activeAction}
+              onStopLoading={stopLoading}
+              onStartBrowserOAuth={() =>
+                void startBrowserOAuth("google-gemini")
+              }
+              onAskLogout={() => askLogout("google-gemini")}
             />
           </div>
         )}

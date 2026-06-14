@@ -10,33 +10,25 @@ import type { OAuthProviderStatus } from "@/api/oauth"
 import { Button } from "@/components/ui/button"
 
 import { CredentialCard } from "./credential-card"
-import { ModelPresetList } from "./model-preset-list"
 
-interface AntigravityCredentialCardProps {
+interface GeminiCredentialCardProps {
   status?: OAuthProviderStatus
   activeAction: string
-  selectingModel: string
   onStopLoading: () => void
   onStartBrowserOAuth: () => void
   onAskLogout: () => void
-  onSelectModel: (modelID: string) => void
 }
 
-export function AntigravityCredentialCard({
+export function GeminiCredentialCard({
   status,
   activeAction,
-  selectingModel,
   onStopLoading,
   onStartBrowserOAuth,
   onAskLogout,
-  onSelectModel,
-}: AntigravityCredentialCardProps) {
+}: GeminiCredentialCardProps) {
   const { t } = useTranslation()
   const actionBusy = activeAction !== ""
-  const browserLoading = activeAction === "google-antigravity:browser"
-  const activeSelectModel = selectingModel.startsWith("google-antigravity:")
-    ? selectingModel.slice("google-antigravity:".length)
-    : ""
+  const browserLoading = activeAction === "google-gemini:browser"
 
   return (
     <CredentialCard
@@ -45,10 +37,10 @@ export function AntigravityCredentialCard({
           <span className="border-muted inline-flex size-6 items-center justify-center rounded-full border">
             <IconBrandGoogle className="size-3.5" />
           </span>
-          <span>Google Antigravity</span>
+          <span>Google Gemini Code Assist</span>
         </span>
       }
-      description={t("credentials.providers.antigravity.description")}
+      description={t("credentials.providers.gemini.description")}
       status={status?.status ?? "not_logged_in"}
       authMethod={status?.auth_method}
       details={
@@ -64,14 +56,6 @@ export function AntigravityCredentialCard({
             </p>
           )}
         </div>
-      }
-      modelSelector={
-        <ModelPresetList
-          presets={status?.model_presets ?? []}
-          activeModel={status?.active_model ?? ""}
-          selectingModel={activeSelectModel}
-          onSelectModel={onSelectModel}
-        />
       }
       actions={
         <div className="border-muted flex h-[120px] flex-col justify-center rounded-lg border p-3">
@@ -110,7 +94,7 @@ export function AntigravityCredentialCard({
             onClick={onAskLogout}
             className="text-destructive hover:bg-destructive/10 hover:text-destructive"
           >
-            {activeAction === "google-antigravity:logout" && (
+            {activeAction === "google-gemini:logout" && (
               <IconLoader2 className="size-4 animate-spin" />
             )}
             {t("credentials.actions.logout")}

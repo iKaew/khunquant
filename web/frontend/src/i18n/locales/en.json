@@ -127,7 +127,10 @@
         "description": "Uses token login for Claude access."
       },
       "antigravity": {
-        "description": "Uses browser OAuth for Google Cloud Code Assist."
+        "description": "For personal Gmail users with Google One AI Premium subscription. Sign in with your personal Google account."
+      },
+      "gemini": {
+        "description": "For enterprise users with Gemini Code Assist Standard or Enterprise subscription. Sign in with your company Google Workspace account."
       }
     },
     "status": {
@@ -155,6 +158,9 @@
       "account": "Account",
       "email": "Email",
       "project": "Project"
+    },
+    "model": {
+      "label": "Model"
     },
     "errors": {
       "loadFailed": "Failed to load credentials",

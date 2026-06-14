@@ -771,32 +771,33 @@ type DebugConfig struct {
 }
 
 type ProvidersConfig struct {
-	Anthropic     ProviderConfig       `json:"anthropic"`
-	OpenAI        OpenAIProviderConfig `json:"openai"`
-	LiteLLM       ProviderConfig       `json:"litellm"`
-	OpenRouter    ProviderConfig       `json:"openrouter"`
-	Groq          ProviderConfig       `json:"groq"`
-	Zhipu         ProviderConfig       `json:"zhipu"`
-	VLLM          ProviderConfig       `json:"vllm"`
-	Gemini        ProviderConfig       `json:"gemini"`
-	Nvidia        ProviderConfig       `json:"nvidia"`
-	Ollama        ProviderConfig       `json:"ollama"`
-	Moonshot      ProviderConfig       `json:"moonshot"`
-	ShengSuanYun  ProviderConfig       `json:"shengsuanyun"`
-	DeepSeek      ProviderConfig       `json:"deepseek"`
-	Cerebras      ProviderConfig       `json:"cerebras"`
-	Vivgrid       ProviderConfig       `json:"vivgrid"`
-	VolcEngine    ProviderConfig       `json:"volcengine"`
-	GitHubCopilot ProviderConfig       `json:"github_copilot"`
-	Antigravity   ProviderConfig       `json:"antigravity"`
-	Qwen          ProviderConfig       `json:"qwen"`
-	Mistral       ProviderConfig       `json:"mistral"`
-	Avian         ProviderConfig       `json:"avian"`
-	Minimax       ProviderConfig       `json:"minimax"`
-	LongCat       ProviderConfig       `json:"longcat"`
-	LlamaCpp      ProviderConfig       `json:"llamacpp"`
-	MLXLM         ProviderConfig       `json:"mlx_lm"`
-	ModelScope    ProviderConfig       `json:"modelscope"`
+	Anthropic        ProviderConfig       `json:"anthropic"`
+	OpenAI           OpenAIProviderConfig `json:"openai"`
+	LiteLLM          ProviderConfig       `json:"litellm"`
+	OpenRouter       ProviderConfig       `json:"openrouter"`
+	Groq             ProviderConfig       `json:"groq"`
+	Zhipu            ProviderConfig       `json:"zhipu"`
+	VLLM             ProviderConfig       `json:"vllm"`
+	Gemini           ProviderConfig       `json:"gemini"`
+	Nvidia           ProviderConfig       `json:"nvidia"`
+	Ollama           ProviderConfig       `json:"ollama"`
+	Moonshot         ProviderConfig       `json:"moonshot"`
+	ShengSuanYun     ProviderConfig       `json:"shengsuanyun"`
+	DeepSeek         ProviderConfig       `json:"deepseek"`
+	Cerebras         ProviderConfig       `json:"cerebras"`
+	Vivgrid          ProviderConfig       `json:"vivgrid"`
+	VolcEngine       ProviderConfig       `json:"volcengine"`
+	GitHubCopilot    ProviderConfig       `json:"github_copilot"`
+	Antigravity      ProviderConfig       `json:"antigravity"`
+	GeminiCodeAssist ProviderConfig       `json:"gemini_code_assist"`
+	Qwen             ProviderConfig       `json:"qwen"`
+	Mistral          ProviderConfig       `json:"mistral"`
+	Avian            ProviderConfig       `json:"avian"`
+	Minimax          ProviderConfig       `json:"minimax"`
+	LongCat          ProviderConfig       `json:"longcat"`
+	LlamaCpp         ProviderConfig       `json:"llamacpp"`
+	MLXLM            ProviderConfig       `json:"mlx_lm"`
+	ModelScope       ProviderConfig       `json:"modelscope"`
 }
 
 // IsEmpty checks if all provider configs are empty (no API keys or API bases set)

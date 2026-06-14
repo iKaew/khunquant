@@ -188,6 +188,9 @@ func CreateProviderFromConfig(cfg *config.ModelConfig) (LLMProvider, string, err
 	case "antigravity":
 		return NewAntigravityProvider(), modelID, nil
 
+	case "gemini-code-assist", "google-gemini":
+		return NewGeminiCodeAssistProvider(), modelID, nil
+
 	case "claude-cli", "claudecli":
 		workspace := cfg.Workspace
 		if workspace == "" {

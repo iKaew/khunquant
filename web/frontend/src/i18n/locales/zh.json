@@ -133,7 +133,10 @@
         "description": "使用 Token 登录 Claude。"
       },
       "antigravity": {
-        "description": "使用浏览器 OAuth 登录 Google Cloud Code Assist。"
+        "description": "适用于拥有 Google One AI Premium 订阅的个人 Gmail 用户。使用您的个人 Google 账号登录。"
+      },
+      "gemini": {
+        "description": "适用于拥有 Gemini Code Assist Standard 或 Enterprise 订阅的企业用户。使用公司 Google Workspace 账号登录。"
       }
     },
     "status": {
@@ -161,6 +164,9 @@
       "account": "账号",
       "email": "邮箱",
       "project": "项目"
+    },
+    "model": {
+      "label": "模型"
     },
     "errors": {
       "loadFailed": "加载凭据失败",

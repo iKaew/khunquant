@@ -12,10 +12,12 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 
 import { CredentialCard } from "./credential-card"
+import { ModelPresetList } from "./model-preset-list"
 
 interface OpenAICredentialCardProps {
   status?: OAuthProviderStatus
   activeAction: string
+  selectingModel: string
   token: string
   onTokenChange: (value: string) => void
   onStartBrowserOAuth: () => void
@@ -23,11 +25,13 @@ interface OpenAICredentialCardProps {
   onStopLoading: () => void
   onSaveToken: () => void
   onAskLogout: () => void
+  onSelectModel: (modelID: string) => void
 }
 
 export function OpenAICredentialCard({
   status,
   activeAction,
+  selectingModel,
   token,
   onTokenChange,
   onStartBrowserOAuth,
@@ -35,6 +39,7 @@ export function OpenAICredentialCard({
   onStopLoading,
   onSaveToken,
   onAskLogout,
+  onSelectModel,
 }: OpenAICredentialCardProps) {
   const { t } = useTranslation()
   const actionBusy = activeAction !== ""
@@ -42,6 +47,9 @@ export function OpenAICredentialCard({
   const deviceLoading = activeAction === "openai:device"
   const oauthLoading = browserLoading || deviceLoading
   const tokenLoading = activeAction === "openai:token"
+  const activeSelectModel = selectingModel.startsWith("openai:")
+    ? selectingModel.slice("openai:".length)
+    : ""
 
   return (
     <CredentialCard
@@ -62,6 +70,14 @@ export function OpenAICredentialCard({
             {t("credentials.labels.account")}: {status.account_id}
           </p>
         ) : null
+      }
+      modelSelector={
+        <ModelPresetList
+          presets={status?.model_presets ?? []}
+          activeModel={status?.active_model ?? ""}
+          selectingModel={activeSelectModel}
+          onSelectModel={onSelectModel}
+        />
       }
       actions={
         <div className="border-muted flex h-[120px] flex-col rounded-lg border p-3">

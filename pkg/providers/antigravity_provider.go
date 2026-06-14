@@ -35,7 +35,17 @@ type AntigravityProvider struct {
 // NewAntigravityProvider creates a new Antigravity provider using stored auth credentials.
 func NewAntigravityProvider() *AntigravityProvider {
 	return &AntigravityProvider{
-		tokenSource: createAntigravityTokenSource(),
+		tokenSource: createGoogleCodeAssistTokenSource("google-antigravity", auth.GoogleAntigravityOAuthConfig),
+		httpClient: &http.Client{
+			Timeout: 120 * time.Second,
+		},
+	}
+}
+
+// NewGeminiCodeAssistProvider creates a provider using Gemini CLI / Gemini Code Assist credentials.
+func NewGeminiCodeAssistProvider() *AntigravityProvider {
+	return &AntigravityProvider{
+		tokenSource: createGoogleCodeAssistTokenSource("google-gemini", auth.GoogleGeminiOAuthConfig),
 		httpClient: &http.Client{
 			Timeout: 120 * time.Second,
 		},
@@ -57,12 +67,14 @@ func (p *AntigravityProvider) Chat(
 		return nil, fmt.Errorf("antigravity auth: %w", err)
 	}
 
-	if model == "" || model == "antigravity" || model == "google-antigravity" {
+	if model == "" || model == "antigravity" || model == "google-antigravity" || model == "gemini-code-assist" || model == "google-gemini" {
 		model = antigravityDefaultModel
 	}
 	// Strip provider prefixes if present
 	model = strings.TrimPrefix(model, "google-antigravity/")
 	model = strings.TrimPrefix(model, "antigravity/")
+	model = strings.TrimPrefix(model, "gemini-code-assist/")
+	model = strings.TrimPrefix(model, "google-gemini/")
 
 	logger.DebugCF("provider.antigravity", "Starting chat", map[string]any{
 		"model":     model,
@@ -554,27 +566,61 @@ func sanitizeSchemaForGemini(schema map[string]any) map[string]any {
 		}
 	}
 
+	// Gemini rejects required[] entries that don't exist in properties.
+	// Tools define required as []string; JSON-round-tripped schemas use []any.
+	// Handle both types and filter to only names present in properties.
+	if props, ok := result["properties"].(map[string]any); ok {
+		var reqNames []string
+		switch req := result["required"].(type) {
+		case []any:
+			for _, r := range req {
+				if name, ok := r.(string); ok {
+					reqNames = append(reqNames, name)
+				}
+			}
+		case []string:
+			reqNames = req
+		}
+		var filtered []string
+		for _, name := range reqNames {
+			if _, defined := props[name]; defined {
+				filtered = append(filtered, name)
+			}
+		}
+		if len(filtered) > 0 {
+			result["required"] = filtered
+		} else {
+			delete(result, "required")
+		}
+	} else {
+		// No properties but required is set — Gemini will reject it.
+		delete(result, "required")
+	}
+
 	return result
 }
 
 // --- Token source ---
 
-func createAntigravityTokenSource() func() (string, string, error) {
+// createGoogleCodeAssistTokenSource builds a token source for any Google Cloud Code Assist credential.
+// credKey is the auth store key (e.g. "google-antigravity" or "google-gemini").
+// oauthCfgFn supplies the matching OAuthProviderConfig for token refresh.
+func createGoogleCodeAssistTokenSource(credKey string, oauthCfgFn func() auth.OAuthProviderConfig) func() (string, string, error) {
 	return func() (string, string, error) {
-		cred, err := auth.GetCredential("google-antigravity")
+		cred, err := auth.GetCredential(credKey)
 		if err != nil {
 			return "", "", fmt.Errorf("loading auth credentials: %w", err)
 		}
 		if cred == nil {
 			return "", "", fmt.Errorf(
-				"no credentials for google-antigravity. Run: khunquant auth login --provider google-antigravity",
+				"no credentials for %s. Run: khunquant auth login --provider %s",
+				credKey, credKey,
 			)
 		}
 
 		// Refresh if needed
 		if cred.NeedsRefresh() && cred.RefreshToken != "" {
-			oauthCfg := auth.GoogleAntigravityOAuthConfig()
-			refreshed, err := auth.RefreshAccessToken(cred, oauthCfg)
+			refreshed, err := auth.RefreshAccessToken(cred, oauthCfgFn())
 			if err != nil {
 				return "", "", fmt.Errorf("refreshing token: %w", err)
 			}
@@ -582,7 +628,7 @@ func createAntigravityTokenSource() func() (string, string, error) {
 			if refreshed.ProjectID == "" {
 				refreshed.ProjectID = cred.ProjectID
 			}
-			if err := auth.SetCredential("google-antigravity", refreshed); err != nil {
+			if err := auth.SetCredential(credKey, refreshed); err != nil {
 				return "", "", fmt.Errorf("saving refreshed token: %w", err)
 			}
 			cred = refreshed
@@ -590,23 +636,23 @@ func createAntigravityTokenSource() func() (string, string, error) {
 
 		if cred.IsExpired() {
 			return "", "", fmt.Errorf(
-				"antigravity credentials expired. Run: khunquant auth login --provider google-antigravity",
+				"%s credentials expired. Run: khunquant auth login --provider %s",
+				credKey, credKey,
 			)
 		}
 
 		projectID := cred.ProjectID
 		if projectID == "" {
-			// Try to fetch project ID from API
 			fetchedID, err := FetchAntigravityProjectID(cred.AccessToken)
 			if err != nil {
 				logger.WarnCF("provider.antigravity", "Could not fetch project ID, using fallback", map[string]any{
 					"error": err.Error(),
 				})
-				projectID = "rising-fact-p41fc" // Default fallback (same as OpenCode)
+				projectID = "rising-fact-p41fc"
 			} else {
 				projectID = fetchedID
 				cred.ProjectID = projectID
-				_ = auth.SetCredential("google-antigravity", cred)
+				_ = auth.SetCredential(credKey, cred)
 			}
 		}
 
@@ -719,22 +765,13 @@ func FetchAntigravityModels(accessToken, projectID string) ([]AntigravityModelIn
 		})
 	}
 
-	// Ensure gemini-3-flash-preview and gemini-3-flash are in the list if they aren't already
-	hasFlashPreview := false
+	// Ensure gemini-3-flash is in the list — it is the Antigravity default and always valid.
+	// Note: gemini-3-flash-preview is a Gemini CLI quota model (separate API) and is NOT valid here.
 	hasFlash := false
 	for _, m := range models {
-		if m.ID == "gemini-3-flash-preview" {
-			hasFlashPreview = true
-		}
 		if m.ID == "gemini-3-flash" {
 			hasFlash = true
 		}
-	}
-	if !hasFlashPreview {
-		models = append(models, AntigravityModelInfo{
-			ID:          "gemini-3-flash-preview",
-			DisplayName: "Gemini 3 Flash (Preview)",
-		})
 	}
 	if !hasFlash {
 		models = append(models, AntigravityModelInfo{

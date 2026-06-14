@@ -11,30 +11,38 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 
 import { CredentialCard } from "./credential-card"
+import { ModelPresetList } from "./model-preset-list"
 
 interface AnthropicCredentialCardProps {
   status?: OAuthProviderStatus
   activeAction: string
+  selectingModel: string
   token: string
   onTokenChange: (value: string) => void
   onStopLoading: () => void
   onSaveToken: () => void
   onAskLogout: () => void
+  onSelectModel: (modelID: string) => void
 }
 
 export function AnthropicCredentialCard({
   status,
   activeAction,
+  selectingModel,
   token,
   onTokenChange,
   onStopLoading,
   onSaveToken,
   onAskLogout,
+  onSelectModel,
 }: AnthropicCredentialCardProps) {
   const { t } = useTranslation()
   const actionBusy = activeAction !== ""
   const tokenLoading = activeAction === "anthropic:token"
   const stopLabel = t("credentials.actions.stopLoading")
+  const activeSelectModel = selectingModel.startsWith("anthropic:")
+    ? selectingModel.slice("anthropic:".length)
+    : ""
 
   return (
     <CredentialCard
@@ -49,6 +57,14 @@ export function AnthropicCredentialCard({
       description={t("credentials.providers.anthropic.description")}
       status={status?.status ?? "not_logged_in"}
       authMethod={status?.auth_method}
+      modelSelector={
+        <ModelPresetList
+          presets={status?.model_presets ?? []}
+          activeModel={status?.active_model ?? ""}
+          selectingModel={activeSelectModel}
+          onSelectModel={onSelectModel}
+        />
+      }
       actions={
         <div className="border-muted flex h-[120px] flex-col justify-center rounded-lg border p-3">
           <div className="flex h-full flex-col gap-3">

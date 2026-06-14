@@ -10,6 +10,7 @@ import {
   loginOAuth,
   logoutOAuth,
   pollOAuthFlow,
+  selectProviderModel,
 } from "@/api/oauth"
 
 type FlowWatchMode = "" | "status" | "poll"
@@ -18,6 +19,7 @@ function getProviderLabel(provider: OAuthProvider | ""): string {
   if (provider === "openai") return "OpenAI"
   if (provider === "anthropic") return "Anthropic"
   if (provider === "google-antigravity") return "Google Antigravity"
+  if (provider === "google-gemini") return "Google Gemini Code Assist"
   return ""
 }
 
@@ -45,6 +47,8 @@ export function useCredentialsPage() {
 
   const [deviceSheetOpen, setDeviceSheetOpen] = useState(false)
   const [deviceFlow, setDeviceFlow] = useState<OAuthFlowState | null>(null)
+
+  const [selectingModel, setSelectingModel] = useState("")
 
   const loadProviders = useCallback(async () => {
     try {
@@ -169,6 +173,7 @@ export function useCredentialsPage() {
   const openaiStatus = providersMap.get("openai")
   const anthropicStatus = providersMap.get("anthropic")
   const antigravityStatus = providersMap.get("google-antigravity")
+  const geminiStatus = providersMap.get("google-gemini")
 
   const bumpActionToken = useCallback(() => {
     actionTokenRef.current += 1
@@ -388,6 +393,27 @@ export function useCredentialsPage() {
     setActiveFlow((prev) => (prev?.status === "pending" ? null : prev))
   }, [bumpActionToken])
 
+  const selectModel = useCallback(
+    async (provider: OAuthProvider, modelID: string) => {
+      const actionKey = `${provider}:${modelID}`
+      setSelectingModel(actionKey)
+      setError("")
+      try {
+        await selectProviderModel(provider, modelID)
+        await loadProviders()
+      } catch (err) {
+        setError(
+          err instanceof Error
+            ? err.message
+            : t("credentials.errors.loadFailed"),
+        )
+      } finally {
+        setSelectingModel("")
+      }
+    },
+    [loadProviders, t],
+  )
+
   const logoutProviderLabel = getProviderLabel(logoutConfirmProvider)
 
   const flowHint = useMemo(() => {
@@ -417,11 +443,13 @@ export function useCredentialsPage() {
     openaiStatus,
     anthropicStatus,
     antigravityStatus,
+    geminiStatus,
     logoutDialogOpen,
     logoutConfirmProvider,
     logoutProviderLabel,
     deviceSheetOpen,
     deviceFlow,
+    selectingModel,
     setOpenAIToken,
     setAnthropicToken,
     startBrowserOAuth,
@@ -432,5 +460,6 @@ export function useCredentialsPage() {
     handleConfirmLogout,
     handleLogoutDialogOpenChange,
     handleDeviceSheetOpenChange,
+    selectModel,
   }
 }

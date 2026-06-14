@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	supportedProvidersMsg = "supported providers: openai, anthropic, google-antigravity, antigravity"
+	supportedProvidersMsg = "supported providers: openai, anthropic, google-antigravity, antigravity, google-gemini, gemini-code-assist"
 	defaultAnthropicModel = "claude-sonnet-4.6"
 )
 
@@ -29,6 +29,8 @@ func authLoginCmd(provider string, useDeviceCode bool, useOauth bool, noBrowser 
 		return authLoginAnthropic(useOauth)
 	case "google-antigravity", "antigravity":
 		return authLoginGoogleAntigravity(noBrowser)
+	case "google-gemini", "gemini-code-assist", "gemini-cli":
+		return authLoginGoogleGemini(noBrowser)
 	default:
 		return fmt.Errorf("unsupported provider: %s (%s)", provider, supportedProvidersMsg)
 	}
@@ -72,14 +74,14 @@ func authLoginOpenAI(useDeviceCode bool, noBrowser bool) error {
 		// If no openai in ModelList, add it
 		if !foundOpenAI {
 			appCfg.ModelList = append(appCfg.ModelList, config.ModelConfig{
-				ModelName:  "gpt-5.4",
-				Model:      "openai/gpt-5.4",
+				ModelName:  "gpt-5.5",
+				Model:      "openai/gpt-5.5",
 				AuthMethod: "oauth",
 			})
 		}
 
 		// Update default model to use OpenAI
-		appCfg.Agents.Defaults.ModelName = "gpt-5.4"
+		appCfg.Agents.Defaults.ModelName = "gpt-5.5"
 
 		if err = config.SaveConfig(internal.GetConfigPath(), appCfg); err != nil {
 			return fmt.Errorf("could not update config: %w", err)
@@ -90,7 +92,7 @@ func authLoginOpenAI(useDeviceCode bool, noBrowser bool) error {
 	if cred.AccountID != "" {
 		fmt.Printf("Account: %s\n", cred.AccountID)
 	}
-	fmt.Println("Default model set to: gpt-5.4")
+	fmt.Println("Default model set to: gpt-5.5")
 
 	return nil
 }
@@ -146,14 +148,14 @@ func authLoginGoogleAntigravity(noBrowser bool) error {
 		// If no antigravity in ModelList, add it
 		if !foundAntigravity {
 			appCfg.ModelList = append(appCfg.ModelList, config.ModelConfig{
-				ModelName:  "gemini-flash",
+				ModelName:  "gemini-3-flash",
 				Model:      "antigravity/gemini-3-flash",
 				AuthMethod: "oauth",
 			})
 		}
 
 		// Update default model
-		appCfg.Agents.Defaults.ModelName = "gemini-flash"
+		appCfg.Agents.Defaults.ModelName = "gemini-3-flash"
 
 		if err := config.SaveConfig(internal.GetConfigPath(), appCfg); err != nil {
 			fmt.Printf("Warning: could not update config: %v\n", err)
@@ -161,7 +163,72 @@ func authLoginGoogleAntigravity(noBrowser bool) error {
 	}
 
 	fmt.Println("\n✓ Google Antigravity login successful!")
-	fmt.Println("Default model set to: gemini-flash")
+	fmt.Println("Default model set to: gemini-3-flash")
+	fmt.Println("Try it: khunquant agent -m \"Hello world\"")
+
+	return nil
+}
+
+func authLoginGoogleGemini(noBrowser bool) error {
+	cfg := auth.GoogleGeminiOAuthConfig()
+
+	cred, err := auth.LoginBrowserWithOptions(cfg, auth.LoginBrowserOptions{NoBrowser: noBrowser})
+	if err != nil {
+		return fmt.Errorf("login failed: %w", err)
+	}
+
+	cred.Provider = "google-gemini"
+
+	email, err := fetchGoogleUserEmail(cred.AccessToken)
+	if err != nil {
+		fmt.Printf("Warning: could not fetch email: %v\n", err)
+	} else {
+		cred.Email = email
+		fmt.Printf("Email: %s\n", email)
+	}
+
+	projectID, err := providers.FetchAntigravityProjectID(cred.AccessToken)
+	if err != nil {
+		fmt.Printf("Warning: could not fetch project ID: %v\n", err)
+		fmt.Println("You may need Google Cloud Code Assist or a Gemini subscription on your account.")
+	} else {
+		cred.ProjectID = projectID
+		fmt.Printf("Project: %s\n", projectID)
+	}
+
+	if err = auth.SetCredential("google-gemini", cred); err != nil {
+		return fmt.Errorf("failed to save credentials: %w", err)
+	}
+
+	appCfg, err := internal.LoadConfig()
+	if err == nil {
+		foundGemini := false
+		for i := range appCfg.ModelList {
+			if isGeminiCodeAssistModel(appCfg.ModelList[i].Model) {
+				appCfg.ModelList[i].AuthMethod = "oauth"
+				foundGemini = true
+				break
+			}
+		}
+		if !foundGemini {
+			appCfg.ModelList = append(appCfg.ModelList, config.ModelConfig{
+				ModelName:  "gemini-flash-codeassist",
+				Model:      "gemini-code-assist/gemini-2.5-flash",
+				AuthMethod: "oauth",
+			})
+		}
+
+		if appCfg.Agents.Defaults.GetModelName() == "" {
+			appCfg.Agents.Defaults.ModelName = "gemini-flash-codeassist"
+		}
+
+		if err := config.SaveConfig(internal.GetConfigPath(), appCfg); err != nil {
+			fmt.Printf("Warning: could not update config: %v\n", err)
+		}
+	}
+
+	fmt.Println("\n✓ Google Gemini Code Assist login successful!")
+	fmt.Println("Model added: gemini-code-assist/gemini-2.5-flash")
 	fmt.Println("Try it: khunquant agent -m \"Hello world\"")
 
 	return nil
@@ -318,13 +385,13 @@ func authLoginPasteToken(provider string) error {
 			}
 			if !found {
 				appCfg.ModelList = append(appCfg.ModelList, config.ModelConfig{
-					ModelName:  "gpt-5.4",
-					Model:      "openai/gpt-5.4",
+					ModelName:  "gpt-5.5",
+					Model:      "openai/gpt-5.5",
 					AuthMethod: "token",
 				})
 			}
 			// Update default model
-			appCfg.Agents.Defaults.ModelName = "gpt-5.4"
+			appCfg.Agents.Defaults.ModelName = "gpt-5.5"
 		}
 		if err := config.SaveConfig(internal.GetConfigPath(), appCfg); err != nil {
 			return fmt.Errorf("could not update config: %w", err)
@@ -361,6 +428,10 @@ func authLogoutCmd(provider string) error {
 					}
 				case "google-antigravity", "antigravity":
 					if isAntigravityModel(appCfg.ModelList[i].Model) {
+						appCfg.ModelList[i].AuthMethod = ""
+					}
+				case "google-gemini", "gemini-code-assist", "gemini-cli":
+					if isGeminiCodeAssistModel(appCfg.ModelList[i].Model) {
 						appCfg.ModelList[i].AuthMethod = ""
 					}
 				}
@@ -457,20 +528,31 @@ func authStatusCmd() error {
 }
 
 func authModelsCmd() error {
-	cred, err := auth.GetCredential("google-antigravity")
+	// Try Antigravity credentials first, then Gemini Code Assist
+	credKey := "google-antigravity"
+	cred, err := auth.GetCredential(credKey)
+	if err != nil || cred == nil {
+		credKey = "google-gemini"
+		cred, err = auth.GetCredential(credKey)
+	}
 	if err != nil || cred == nil {
 		return fmt.Errorf(
-			"not logged in to Google Antigravity.\nrun: khunquant auth login --provider google-antigravity",
+			"not logged in to Google Antigravity or Gemini Code Assist.\nrun: khunquant auth login --provider google-antigravity",
 		)
 	}
 
 	// Refresh token if needed
 	if cred.NeedsRefresh() && cred.RefreshToken != "" {
-		oauthCfg := auth.GoogleAntigravityOAuthConfig()
+		var oauthCfg auth.OAuthProviderConfig
+		if credKey == "google-gemini" {
+			oauthCfg = auth.GoogleGeminiOAuthConfig()
+		} else {
+			oauthCfg = auth.GoogleAntigravityOAuthConfig()
+		}
 		refreshed, refreshErr := auth.RefreshAccessToken(cred, oauthCfg)
 		if refreshErr == nil {
 			cred = refreshed
-			_ = auth.SetCredential("google-antigravity", cred)
+			_ = auth.SetCredential(credKey, cred)
 		}
 	}
 
@@ -513,6 +595,14 @@ func isAntigravityModel(model string) bool {
 		model == "google-antigravity" ||
 		strings.HasPrefix(model, "antigravity/") ||
 		strings.HasPrefix(model, "google-antigravity/")
+}
+
+// isGeminiCodeAssistModel checks if a model string belongs to the gemini-code-assist provider
+func isGeminiCodeAssistModel(model string) bool {
+	return model == "gemini-code-assist" ||
+		model == "google-gemini" ||
+		strings.HasPrefix(model, "gemini-code-assist/") ||
+		strings.HasPrefix(model, "google-gemini/")
 }
 
 // isOpenAIModel checks if a model string belongs to openai provider

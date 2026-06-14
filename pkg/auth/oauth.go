@@ -27,6 +27,7 @@ type OAuthProviderConfig struct {
 	TokenURL     string // Override token endpoint (Google uses a different URL than issuer)
 	Scopes       string
 	Originator   string
+	Provider     string // Explicit provider key for credential storage (e.g. "google-antigravity")
 	Port         int
 }
 
@@ -50,6 +51,8 @@ func OpenAIOAuthConfig() OAuthProviderConfig {
 }
 
 // GoogleAntigravityOAuthConfig returns the OAuth configuration for Google Cloud Code Assist (Antigravity).
+// Configure client credentials with KHUNQUANT_GOOGLE_ANTIGRAVITY_CLIENT_ID
+// and KHUNQUANT_GOOGLE_ANTIGRAVITY_CLIENT_SECRET.
 func GoogleAntigravityOAuthConfig() OAuthProviderConfig {
 	return OAuthProviderConfig{
 		Issuer:       "https://accounts.google.com/o/oauth2/v2",
@@ -57,7 +60,23 @@ func GoogleAntigravityOAuthConfig() OAuthProviderConfig {
 		ClientID:     os.Getenv("KHUNQUANT_GOOGLE_ANTIGRAVITY_CLIENT_ID"),
 		ClientSecret: os.Getenv("KHUNQUANT_GOOGLE_ANTIGRAVITY_CLIENT_SECRET"),
 		Scopes:       "https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/cclog https://www.googleapis.com/auth/experimentsandconfigs",
+		Provider:     "google-antigravity",
 		Port:         51121,
+	}
+}
+
+// GoogleGeminiOAuthConfig returns the OAuth configuration for Gemini CLI / Gemini Code Assist.
+// Configure client credentials with KHUNQUANT_GOOGLE_GEMINI_CLIENT_ID
+// and KHUNQUANT_GOOGLE_GEMINI_CLIENT_SECRET.
+func GoogleGeminiOAuthConfig() OAuthProviderConfig {
+	return OAuthProviderConfig{
+		Issuer:       "https://accounts.google.com/o/oauth2/v2",
+		TokenURL:     "https://oauth2.googleapis.com/token",
+		ClientID:     os.Getenv("KHUNQUANT_GOOGLE_GEMINI_CLIENT_ID"),
+		ClientSecret: os.Getenv("KHUNQUANT_GOOGLE_GEMINI_CLIENT_SECRET"),
+		Scopes:       "https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile",
+		Provider:     "google-gemini",
+		Port:         51122,
 	}
 }
 
@@ -177,13 +196,10 @@ func LoginBrowserWithOptions(cfg OAuthProviderConfig, opts LoginBrowserOptions) 
 func validateOAuthConfig(cfg OAuthProviderConfig) error {
 	isGoogleOAuth := cfg.TokenURL == "https://oauth2.googleapis.com/token"
 	if strings.TrimSpace(cfg.ClientID) == "" {
-		if isGoogleOAuth {
-			return fmt.Errorf("google oauth client ID is required; set KHUNQUANT_GOOGLE_ANTIGRAVITY_CLIENT_ID")
-		}
 		return fmt.Errorf("oauth client ID is required")
 	}
 	if isGoogleOAuth && strings.TrimSpace(cfg.ClientSecret) == "" {
-		return fmt.Errorf("google oauth client secret is required; set KHUNQUANT_GOOGLE_ANTIGRAVITY_CLIENT_SECRET")
+		return fmt.Errorf("google oauth client secret is required")
 	}
 	return nil
 }
@@ -550,9 +566,12 @@ func ExchangeCodeForTokens(cfg OAuthProviderConfig, code, codeVerifier, redirect
 	}
 
 	// Determine provider name from config
-	provider := "openai"
-	if cfg.TokenURL != "" && strings.Contains(cfg.TokenURL, "googleapis.com") {
-		provider = "google-antigravity"
+	provider := cfg.Provider
+	if provider == "" {
+		provider = "openai"
+		if cfg.TokenURL != "" && strings.Contains(cfg.TokenURL, "googleapis.com") {
+			provider = "google-antigravity"
+		}
 	}
 
 	resp, err := http.PostForm(tokenURL, data)

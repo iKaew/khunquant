@@ -1,5 +1,10 @@
-export type OAuthProvider = "openai" | "anthropic" | "google-antigravity"
+export type OAuthProvider = "openai" | "anthropic" | "google-antigravity" | "google-gemini"
 export type OAuthMethod = "browser" | "device_code" | "token"
+
+export interface OAuthModelPreset {
+  label: string
+  model_id: string
+}
 
 export interface OAuthProviderStatus {
   provider: OAuthProvider
@@ -12,6 +17,8 @@ export interface OAuthProviderStatus {
   account_id?: string
   email?: string
   project_id?: string
+  model_presets?: OAuthModelPreset[]
+  active_model?: string
 }
 
 export interface OAuthFlowState {
@@ -97,6 +104,20 @@ export async function logoutOAuth(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ provider }),
+    },
+  )
+}
+
+export async function selectProviderModel(
+  provider: OAuthProvider,
+  modelID: string,
+): Promise<{ status: string; model_id: string; model_name: string }> {
+  return request<{ status: string; model_id: string; model_name: string }>(
+    `/api/oauth/providers/${encodeURIComponent(provider)}/select-model`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model_id: modelID }),
     },
   )
 }

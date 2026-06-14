@@ -99,7 +99,10 @@
         "description": "ใช้การเข้าสู่ระบบด้วย Token สำหรับการเข้าถึง Claude"
       },
       "antigravity": {
-        "description": "ใช้ Browser OAuth สำหรับ Google Cloud Code Assist"
+        "description": "สำหรับผู้ใช้ Gmail ส่วนตัวที่มีสมาชิก Google One AI Premium เข้าสู่ระบบด้วยบัญชี Google ส่วนตัวของคุณ"
+      },
+      "gemini": {
+        "description": "สำหรับผู้ใช้องค์กรที่มีสมาชิก Gemini Code Assist Standard หรือ Enterprise เข้าสู่ระบบด้วยบัญชี Google Workspace ของบริษัท"
       }
     },
     "status": {
@@ -127,6 +130,9 @@
       "account": "บัญชี",
       "email": "อีเมล",
       "project": "โปรเจกต์"
+    },
+    "model": {
+      "label": "โมเดล"
     },
     "errors": {
       "loadFailed": "โหลดข้อมูลรับรองล้มเหลว",

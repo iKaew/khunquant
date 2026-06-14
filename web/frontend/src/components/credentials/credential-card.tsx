@@ -10,6 +10,7 @@ interface CredentialCardProps {
   status: OAuthProviderStatus["status"]
   authMethod?: string
   details?: ReactNode
+  modelSelector?: ReactNode
   actions: ReactNode
   footer?: ReactNode
 }
@@ -20,6 +21,7 @@ export function CredentialCard({
   status,
   authMethod,
   details,
+  modelSelector,
   actions,
   footer,
 }: CredentialCardProps) {
@@ -34,6 +36,10 @@ export function CredentialCard({
       <div className="text-muted-foreground mt-3 min-h-11 text-xs leading-5">
         {details}
       </div>
+
+      {modelSelector && (
+        <div className="mt-3 border-t pt-3">{modelSelector}</div>
+      )}
 
       <div className="mt-auto flex flex-col gap-4 pt-4">
         <div className="min-h-[112px]">{actions}</div>
